@@ -1,24 +1,35 @@
-use crate::cli::BuildArgs;
-use miette::{IntoDiagnostic, Result, miette};
-use std::env;
+use crate::{
+    build::{PrepareBuildOptions, prepare_build},
+    cli::BuildArgs,
+    plan::BuildPlan,
+    project::load_project_metadata,
+};
+use miette::Result;
 
 pub fn run(args: BuildArgs) -> Result<()> {
-    let cwd = env::current_dir().into_diagnostic()?;
+    let metadata = load_project_metadata(&args.project, args.python.as_deref())?;
+    let plan = BuildPlan::resolve(metadata, args.entrypoint.as_deref())?;
+    let prepared = prepare_build(
+        &plan,
+        &PrepareBuildOptions {
+            work_dir: args.work_dir.clone(),
+        },
+    )?;
 
-    Err(miette!(
-        "build is not implemented yet.\n\
-         project: {}\n\
-         cwd: {}\n\
-         output: {}\n\
-         entrypoint: {}\n\
-         python override: {}",
-        args.project.display(),
-        cwd.display(),
-        args.output
-            .as_ref()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "<default>".to_string()),
-        args.entrypoint.as_deref().unwrap_or("<auto>"),
-        args.python.as_deref().unwrap_or("<from project>"),
-    ))
+    println!("Prepared staged build for `{}`", plan.package_name);
+    println!("Work dir: {}", prepared.work_dir.display());
+    println!("Conda prefix: {}", prepared.conda_prefix.display());
+    println!("Inner uv env: {}", prepared.inner_env_path.display());
+    println!("Packed env: {}", prepared.packed_env_path.display());
+    println!("Stage dir: {}", prepared.stage_dir.display());
+    println!("Launcher: {}", prepared.launcher_relpath.display());
+
+    if let Some(output) = args.output {
+        println!(
+            "Final executable output is not wired yet; requested path was {}",
+            output.display()
+        );
+    }
+
+    Ok(())
 }

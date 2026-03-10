@@ -74,6 +74,13 @@ pub struct BuildArgs {
         help = "Override the Python version request before handing it to conda."
     )]
     pub python: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Keep intermediate build artifacts in this directory."
+    )]
+    pub work_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
