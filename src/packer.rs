@@ -1,7 +1,8 @@
 use crate::sfx;
 use flate2::{Compression, write::GzEncoder};
-use miette::{IntoDiagnostic, Result, miette};
+use miette::{IntoDiagnostic, Result, WrapErr, miette};
 use std::{
+    env,
     fs::{self, File},
     io::{self, Write, copy},
     path::{Path, PathBuf},
@@ -12,7 +13,7 @@ use tempfile::NamedTempFile;
 
 #[derive(Debug, Clone)]
 pub struct PackOptions {
-    pub runner_path: PathBuf,
+    pub stub_path: Option<PathBuf>,
     pub unique_id: bool,
 }
 
@@ -51,7 +52,13 @@ pub fn pack_directory(
         String::new()
     };
 
-    let runner_bytes = fs::read(&options.runner_path).into_diagnostic()?;
+    let stub_path = options.stub_path.clone().unwrap_or(current_stub_path()?);
+    let runner_bytes = fs::read(&stub_path).into_diagnostic().wrap_err_with(|| {
+        format!(
+            "failed to read the SFX stub executable at `{}`",
+            stub_path.display()
+        )
+    })?;
     let tarball = create_tgz(input_dir)?;
     let metadata = sfx::encode_metadata(exec_relpath, &build_uid);
     let payload_len = tarball.as_file().metadata().into_diagnostic()?.len();
@@ -67,6 +74,12 @@ pub fn pack_directory(
     drop(output);
 
     Ok(PackManifest { build_uid })
+}
+
+fn current_stub_path() -> Result<std::path::PathBuf> {
+    env::current_exe()
+        .into_diagnostic()
+        .wrap_err("could not determine the current pybin executable for SFX packing")
 }
 
 fn create_tgz(input_dir: &Path) -> Result<NamedTempFile> {

@@ -27,23 +27,20 @@ fn builds_and_runs_the_demo_fixture_as_a_single_binary() {
     )
     .expect("prepared build");
 
-    let runner_path = PathBuf::from(env!("CARGO_BIN_EXE_pybin-runner"));
     let exec_relpath = prepared.launcher_relpath.to_string_lossy().to_string();
+    let stub_path = PathBuf::from(env!("CARGO_BIN_EXE_pybin"));
     let manifest = pack_directory(
         &prepared.stage_dir,
         &exec_relpath,
         &output,
         &PackOptions {
-            runner_path,
+            stub_path: Some(stub_path),
             unique_id: true,
         },
     )
     .expect("packed output");
 
-    assert!(
-        !manifest.build_uid.is_empty(),
-        "expected a unique build id"
-    );
+    assert!(!manifest.build_uid.is_empty(), "expected a unique build id");
 
     let first = Command::new(&output)
         .env("WARP_CACHE_DIR", &cache_dir)
@@ -56,7 +53,10 @@ fn builds_and_runs_the_demo_fixture_as_a_single_binary() {
         String::from_utf8_lossy(&first.stdout),
         String::from_utf8_lossy(&first.stderr),
     );
-    assert_eq!(String::from_utf8_lossy(&first.stdout), "demo-args:smoke,one\n");
+    assert_eq!(
+        String::from_utf8_lossy(&first.stdout),
+        "demo-args:smoke,one\n"
+    );
 
     fs::remove_dir_all(&cache_dir).expect("remove cache dir");
 

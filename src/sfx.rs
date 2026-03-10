@@ -31,6 +31,19 @@ pub fn footer_bytes(payload_len: u64, metadata_len: u32) -> Vec<u8> {
 
 pub fn read_bundle(path: &Path) -> Result<BundleMetadata> {
     let bytes = fs::read(path).into_diagnostic()?;
+    read_bundle_from_bytes(&bytes)
+}
+
+pub fn has_embedded_bundle(path: &Path) -> Result<bool> {
+    let bytes = fs::read(path).into_diagnostic()?;
+    match read_bundle_from_bytes(&bytes) {
+        Ok(_) => Ok(true),
+        Err(error) if looks_like_missing_bundle_error(&error.to_string()) => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+fn read_bundle_from_bytes(bytes: &[u8]) -> Result<BundleMetadata> {
     let footer = bytes
         .get(bytes.len().saturating_sub(FOOTER_LEN)..)
         .ok_or_else(|| miette!("packed executable was too small to contain a footer"))?;
@@ -64,6 +77,14 @@ pub fn read_bundle(path: &Path) -> Result<BundleMetadata> {
     let metadata = &bytes[metadata_start..metadata_end];
 
     decode_metadata(metadata, payload_start as u64, payload_len)
+}
+
+fn looks_like_missing_bundle_error(message: &str) -> bool {
+    matches!(
+        message,
+        "packed executable was too small to contain a footer"
+            | "packed executable did not contain a valid pybin footer"
+    )
 }
 
 fn decode_metadata(bytes: &[u8], payload_offset: u64, payload_len: u64) -> Result<BundleMetadata> {
@@ -119,5 +140,14 @@ mod tests {
                 payload_len: 42,
             }
         );
+    }
+
+    #[test]
+    fn missing_footer_is_not_treated_as_embedded_bundle() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("plain-bin");
+        fs::write(&path, b"plain executable body").expect("write plain binary");
+
+        assert!(!has_embedded_bundle(&path).expect("probe bundle"));
     }
 }

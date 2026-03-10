@@ -10,9 +10,15 @@ pub mod sfx;
 
 use clap::Parser;
 use cli::{Cli, Command};
-use miette::Result;
+use miette::{IntoDiagnostic, Result};
+use std::env;
 
 pub fn run() -> Result<()> {
+    let self_path = env::current_exe().into_diagnostic()?;
+    if sfx::has_embedded_bundle(&self_path)? {
+        return runner::run();
+    }
+
     let cli = Cli::parse();
     logging::init(cli.verbose, cli.quiet)?;
 

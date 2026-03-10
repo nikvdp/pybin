@@ -5,9 +5,9 @@ use crate::{
     plan::BuildPlan,
     project::load_project_metadata,
 };
-use miette::{IntoDiagnostic, Result, miette};
+use miette::{IntoDiagnostic, Result};
 use std::{
-    env, fs,
+    fs,
     path::{Path, PathBuf},
 };
 
@@ -20,7 +20,6 @@ pub fn run(args: BuildArgs) -> Result<()> {
             work_dir: args.work_dir.clone(),
         },
     )?;
-    let runner_path = bundled_runner_path()?;
     let output_path = resolve_output_path(&plan, args.output.as_deref())?;
     if let Some(parent) = output_path.parent() {
         fs::create_dir_all(parent).into_diagnostic()?;
@@ -31,7 +30,7 @@ pub fn run(args: BuildArgs) -> Result<()> {
         &exec_relpath,
         &output_path,
         &PackOptions {
-            runner_path,
+            stub_path: None,
             unique_id: true,
         },
     )?;
@@ -48,25 +47,6 @@ pub fn run(args: BuildArgs) -> Result<()> {
     println!("Launcher: {}", prepared.launcher_relpath.display());
 
     Ok(())
-}
-
-fn bundled_runner_path() -> Result<PathBuf> {
-    let self_path = env::current_exe().into_diagnostic()?;
-    let runner_name = if cfg!(windows) {
-        "pybin-runner.exe"
-    } else {
-        "pybin-runner"
-    };
-    let runner_path = self_path.with_file_name(runner_name);
-
-    if runner_path.is_file() {
-        return Ok(runner_path);
-    }
-
-    Err(miette!(
-        "could not find the internal runner binary at `{}`",
-        runner_path.display()
-    ))
 }
 
 fn resolve_output_path(plan: &BuildPlan, output_override: Option<&Path>) -> Result<PathBuf> {

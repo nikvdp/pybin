@@ -14,7 +14,7 @@ fn packed_runner_executes_a_staged_script() {
     let cache_dir = temp.path().join("cache");
     let output = temp.path().join("hello-sfx");
     let script = bin_dir.join("hello");
-    let runner_path = PathBuf::from(env!("CARGO_BIN_EXE_pybin-runner"));
+    let stub_path = PathBuf::from(env!("CARGO_BIN_EXE_pybin"));
 
     fs::create_dir_all(&bin_dir).expect("create staged bin dir");
     fs::write(&script, "#!/bin/sh\necho runner-ok\n").expect("write script");
@@ -30,7 +30,7 @@ fn packed_runner_executes_a_staged_script() {
         "bin/hello",
         &output,
         &PackOptions {
-            runner_path,
+            stub_path: Some(stub_path),
             unique_id: true,
         },
     )
