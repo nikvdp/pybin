@@ -72,7 +72,7 @@ Run the produced binary:
 Override the extraction cache root:
 
 ```bash
-WARP_CACHE_DIR=/tmp/pybin-cache /tmp/demo-sfx hello
+PYBIN_CACHE_DIR=/tmp/pybin-cache /tmp/demo-sfx hello
 ```
 
 Inspect the resolved build plan before packaging:

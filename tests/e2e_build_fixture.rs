@@ -43,7 +43,7 @@ fn builds_and_runs_the_demo_fixture_as_a_single_binary() {
     assert!(!manifest.build_uid.is_empty(), "expected a unique build id");
 
     let first = Command::new(&output)
-        .env("WARP_CACHE_DIR", &cache_dir)
+        .env("PYBIN_CACHE_DIR", &cache_dir)
         .args(["smoke", "one"])
         .output()
         .expect("run packed fixture");
@@ -61,7 +61,7 @@ fn builds_and_runs_the_demo_fixture_as_a_single_binary() {
     fs::remove_dir_all(&cache_dir).expect("remove cache dir");
 
     let second = Command::new(&output)
-        .env("WARP_CACHE_DIR", &cache_dir)
+        .env("PYBIN_CACHE_DIR", &cache_dir)
         .arg("two")
         .output()
         .expect("rerun packed fixture");

@@ -43,13 +43,17 @@ pub fn run() -> Result<()> {
 }
 
 fn cache_path(target: &str) -> Result<PathBuf> {
+    if let Ok(root) = env::var("PYBIN_CACHE_DIR") {
+        return Ok(PathBuf::from(root).join("packages").join(target));
+    }
+
     if let Ok(root) = env::var("WARP_CACHE_DIR") {
         return Ok(PathBuf::from(root).join("packages").join(target));
     }
 
     let root = data_local_dir()
         .ok_or_else(|| miette!("no local data directory was available for cache extraction"))?;
-    Ok(root.join("warp").join("packages").join(target))
+    Ok(root.join(".pybin").join("packages").join(target))
 }
 
 fn extract(executable: &Path, bundle: &sfx::BundleMetadata, cache_path: &Path) -> Result<()> {

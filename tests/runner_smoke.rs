@@ -42,7 +42,7 @@ fn packed_runner_executes_a_staged_script() {
     );
 
     let result = Command::new(&output)
-        .env("WARP_CACHE_DIR", &cache_dir)
+        .env("PYBIN_CACHE_DIR", &cache_dir)
         .output()
         .expect("run packed output");
 
