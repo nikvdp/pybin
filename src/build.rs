@@ -22,24 +22,27 @@ pub enum BuildPhase {
     SyncUvProject,
     PackCondaPrefix,
     UnpackPackedPrefix,
+    PruneStagedRuntime,
     WriteLauncher,
     AssembleExecutable,
 }
 
 impl BuildPhase {
-    pub const PREPARE_PHASES: [BuildPhase; 5] = [
+    pub const PREPARE_PHASES: [BuildPhase; 6] = [
         BuildPhase::CreateCondaPrefix,
         BuildPhase::SyncUvProject,
         BuildPhase::PackCondaPrefix,
         BuildPhase::UnpackPackedPrefix,
+        BuildPhase::PruneStagedRuntime,
         BuildPhase::WriteLauncher,
     ];
 
-    pub const ALL_PHASES: [BuildPhase; 6] = [
+    pub const ALL_PHASES: [BuildPhase; 7] = [
         BuildPhase::CreateCondaPrefix,
         BuildPhase::SyncUvProject,
         BuildPhase::PackCondaPrefix,
         BuildPhase::UnpackPackedPrefix,
+        BuildPhase::PruneStagedRuntime,
         BuildPhase::WriteLauncher,
         BuildPhase::AssembleExecutable,
     ];
@@ -50,6 +53,7 @@ impl BuildPhase {
             BuildPhase::SyncUvProject => "Sync uv project into build environment",
             BuildPhase::PackCondaPrefix => "Pack relocatable conda prefix",
             BuildPhase::UnpackPackedPrefix => "Unpack staged runtime tree",
+            BuildPhase::PruneStagedRuntime => "Prune non-runtime files from staged tree",
             BuildPhase::WriteLauncher => "Write packaged launcher shim",
             BuildPhase::AssembleExecutable => "Assemble self-extracting executable",
         }
@@ -65,6 +69,7 @@ impl BuildPhase {
             }
             BuildPhase::PackCondaPrefix => "Packing the relocatable conda prefix",
             BuildPhase::UnpackPackedPrefix => "Unpacking the packed prefix into the staging area",
+            BuildPhase::PruneStagedRuntime => "Pruning non-runtime files from the staged tree",
             BuildPhase::WriteLauncher => "Writing the packaged entry shim",
             BuildPhase::AssembleExecutable => "Assembling the final self-extracting binary",
         }
@@ -76,6 +81,7 @@ impl BuildPhase {
             BuildPhase::SyncUvProject => "Synced uv project into packaged runtime",
             BuildPhase::PackCondaPrefix => "Packed relocatable conda prefix",
             BuildPhase::UnpackPackedPrefix => "Unpacked staged runtime tree",
+            BuildPhase::PruneStagedRuntime => "Pruned non-runtime files from staged tree",
             BuildPhase::WriteLauncher => "Wrote packaged entry shim",
             BuildPhase::AssembleExecutable => "Assembled self-extracting executable",
         }
@@ -220,6 +226,9 @@ pub fn prepare_build(
 
     run_phase(progress, BuildPhase::UnpackPackedPrefix, || {
         unpack_tarball(&paths.packed_env_path, &paths.stage_dir)
+    })?;
+    run_phase(progress, BuildPhase::PruneStagedRuntime, || {
+        prune_staged_runtime(&paths.stage_dir, &paths.logs_dir)
     })?;
     run_phase(progress, BuildPhase::WriteLauncher, || {
         write_launcher(plan, &paths.stage_dir, &launcher_relpath)
@@ -374,6 +383,162 @@ exec \"$ROOT_DIR/{inner_env}/bin/python\" -c \"$PYBIN_ENTRYPOINT\" \"{entrypoint
     }
 
     Ok(())
+}
+
+#[derive(Debug, Default)]
+struct RuntimePruneSummary {
+    removed_entries: u64,
+    removed_bytes: u64,
+    removed_paths: Vec<String>,
+}
+
+impl RuntimePruneSummary {
+    fn note_removed_path(&mut self, path: &Path, bytes: u64, reason: &str) {
+        self.removed_entries += 1;
+        self.removed_bytes += bytes;
+        self.removed_paths.push(format!(
+            "{reason}: {} ({})",
+            path.display(),
+            format_bytes(bytes)
+        ));
+    }
+}
+
+fn prune_staged_runtime(stage_dir: &Path, logs_dir: &Path) -> Result<()> {
+    let mut summary = RuntimePruneSummary::default();
+    walk_and_prune(stage_dir, &mut summary)?;
+    write_prune_log(logs_dir, &summary)?;
+
+    info!(
+        removed_entries = summary.removed_entries,
+        removed_bytes = summary.removed_bytes,
+        "pruned non-runtime files from staged tree",
+    );
+
+    Ok(())
+}
+
+fn remove_path_if_present(
+    path: &Path,
+    reason: &str,
+    summary: &mut RuntimePruneSummary,
+) -> Result<()> {
+    let Some((bytes, is_dir)) = path_size_and_kind(path)? else {
+        return Ok(());
+    };
+
+    if is_dir {
+        fs::remove_dir_all(path).into_diagnostic()?;
+    } else {
+        fs::remove_file(path).into_diagnostic()?;
+    }
+    summary.note_removed_path(path, bytes, reason);
+    Ok(())
+}
+
+fn walk_and_prune(path: &Path, summary: &mut RuntimePruneSummary) -> Result<()> {
+    if !path.is_dir() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(path).into_diagnostic()? {
+        let entry = entry.into_diagnostic()?;
+        let child_path = entry.path();
+        let file_type = entry.file_type().into_diagnostic()?;
+
+        if file_type.is_dir() {
+            if entry.file_name() == "__pycache__" {
+                remove_path_if_present(&child_path, "__pycache__", summary)?;
+                continue;
+            }
+
+            walk_and_prune(&child_path, summary)?;
+            continue;
+        }
+
+        if should_prune_file(&child_path) {
+            let reason = child_path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| format!("*.{ext}"))
+                .unwrap_or_else(|| "file".to_string());
+            remove_path_if_present(&child_path, &reason, summary)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn should_prune_file(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|ext| ext.to_str()),
+        Some("pyc" | "pyo")
+    )
+}
+
+fn path_size_and_kind(path: &Path) -> Result<Option<(u64, bool)>> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error).into_diagnostic(),
+    };
+
+    if metadata.is_dir() {
+        Ok(Some((directory_size(path)?, true)))
+    } else {
+        Ok(Some((metadata.len(), false)))
+    }
+}
+
+fn directory_size(path: &Path) -> Result<u64> {
+    let mut total = 0_u64;
+    for entry in fs::read_dir(path).into_diagnostic()? {
+        let entry = entry.into_diagnostic()?;
+        let child = entry.path();
+        let metadata = fs::symlink_metadata(&child).into_diagnostic()?;
+        if metadata.is_dir() {
+            total = total.saturating_add(directory_size(&child)?);
+        } else {
+            total = total.saturating_add(metadata.len());
+        }
+    }
+    Ok(total)
+}
+
+fn write_prune_log(logs_dir: &Path, summary: &RuntimePruneSummary) -> Result<()> {
+    let log_path = logs_dir.join("prune-runtime.log");
+    let mut body = String::new();
+    body.push_str(&format!(
+        "removed entries: {}\nremoved bytes: {} ({})\n",
+        summary.removed_entries,
+        summary.removed_bytes,
+        format_bytes(summary.removed_bytes),
+    ));
+
+    if summary.removed_paths.is_empty() {
+        body.push_str("\nremoved paths:\n  <none>\n");
+    } else {
+        body.push_str("\nremoved paths:\n");
+        for entry in &summary.removed_paths {
+            body.push_str(&format!("  {entry}\n"));
+        }
+    }
+
+    fs::write(log_path, body).into_diagnostic()?;
+    Ok(())
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+
+    if bytes as f64 >= MIB {
+        format!("{:.1} MiB", bytes as f64 / MIB)
+    } else if bytes as f64 >= KIB {
+        format!("{:.1} KiB", bytes as f64 / KIB)
+    } else {
+        format!("{bytes} B")
+    }
 }
 
 fn parse_entrypoint_target(target: &str) -> Result<(&str, &str)> {
