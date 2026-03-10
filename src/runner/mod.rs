@@ -7,7 +7,7 @@ use miette::{IntoDiagnostic, Result, miette};
 use std::{
     env, fs,
     path::{Path, PathBuf},
-    process,
+    process::{self, Command, Stdio},
 };
 
 pub fn run() -> Result<()> {
@@ -55,5 +55,29 @@ fn cache_path(target: &str) -> Result<PathBuf> {
 fn extract(executable: &Path, bundle: &sfx::BundleMetadata, cache_path: &Path) -> Result<()> {
     fs::remove_dir_all(cache_path).ok();
     extractor::extract_to(executable, bundle, cache_path).into_diagnostic()?;
+    run_conda_unpack(cache_path)?;
     Ok(())
+}
+
+fn run_conda_unpack(cache_path: &Path) -> Result<()> {
+    let unpack = cache_path.join("bin").join("conda-unpack");
+    if !unpack.is_file() {
+        return Ok(());
+    }
+
+    let status = Command::new(&unpack)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .into_diagnostic()?;
+
+    if status.success() {
+        return Ok(());
+    }
+
+    Err(miette!(
+        "conda-unpack failed inside `{}`",
+        cache_path.display()
+    ))
 }
