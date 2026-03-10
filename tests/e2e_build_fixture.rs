@@ -3,6 +3,7 @@ use pybin::{
     packer::{PackOptions, pack_directory},
     plan::BuildPlan,
     project::load_project_metadata,
+    sfx::PayloadCompression,
 };
 use std::{fs, path::PathBuf, process::Command};
 use tempfile::tempdir;
@@ -36,6 +37,7 @@ fn builds_and_runs_the_demo_fixture_as_a_single_binary() {
         &PackOptions {
             stub_path: Some(stub_path),
             unique_id: true,
+            payload_compression: PayloadCompression::Zstd,
         },
     )
     .expect("packed output");
