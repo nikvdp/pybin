@@ -35,6 +35,7 @@ fn format_python_request(request: &crate::project::PythonRequest) -> String {
     let source = match request.source {
         PythonRequestSource::Override => "override",
         PythonRequestSource::DotPythonVersion => ".python-version",
+        PythonRequestSource::DotVenv => ".venv/pyvenv.cfg",
         PythonRequestSource::RequiresPython => "project.requires-python",
     };
 

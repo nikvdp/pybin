@@ -212,11 +212,7 @@ fn write_launcher(plan: &BuildPlan, stage_dir: &Path, launcher_relpath: &Path) -
         fs::create_dir_all(parent).into_diagnostic()?;
     }
 
-    let entrypoint = if cfg!(windows) {
-        format!("{}.exe", plan.entrypoint_name)
-    } else {
-        plan.entrypoint_name.clone()
-    };
+    let (entry_module, entry_attr) = parse_entrypoint_target(&plan.entrypoint_target)?;
     let inner_env = plan.inner_env_relative_path.to_string_lossy();
     let script = format!(
         "#!/usr/bin/env bash\n\
@@ -224,7 +220,14 @@ set -euo pipefail\n\
 SCRIPT_DIR=\"$(cd \"$(dirname \"$0\")\" && pwd)\"\n\
 ROOT_DIR=\"$(cd \"$SCRIPT_DIR/..\" && pwd)\"\n\
 export PATH=\"$ROOT_DIR/{inner_env}/bin:$ROOT_DIR/bin:$PATH\"\n\
-exec \"$ROOT_DIR/{inner_env}/bin/{entrypoint}\" \"$@\"\n"
+PYBIN_ENTRYPOINT='import importlib\n\
+import sys\n\
+from functools import reduce\n\
+script_name, module_name, attr_path = sys.argv[1:4]; sys.argv = [script_name] + sys.argv[4:]; obj = reduce(getattr, attr_path.split(\".\"), importlib.import_module(module_name)); raise SystemExit(obj())'\n\
+exec \"$ROOT_DIR/{inner_env}/bin/python\" -c \"$PYBIN_ENTRYPOINT\" \"{entrypoint_name}\" \"{entry_module}\" \"{entry_attr}\" \"$@\"\n",
+        entrypoint_name = plan.entrypoint_name,
+        entry_module = entry_module,
+        entry_attr = entry_attr,
     );
 
     fs::write(&launcher_path, script).into_diagnostic()?;
@@ -241,6 +244,20 @@ exec \"$ROOT_DIR/{inner_env}/bin/{entrypoint}\" \"$@\"\n"
     }
 
     Ok(())
+}
+
+fn parse_entrypoint_target(target: &str) -> Result<(&str, &str)> {
+    let (module, attr) = target.split_once(':').ok_or_else(|| {
+        miette!("entrypoint target `{target}` is not a valid `module:function` reference")
+    })?;
+
+    if module.is_empty() || attr.is_empty() {
+        return Err(miette!(
+            "entrypoint target `{target}` is not a valid `module:function` reference"
+        ));
+    }
+
+    Ok((module, attr))
 }
 
 fn run_logged(

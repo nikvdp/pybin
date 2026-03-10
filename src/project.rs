@@ -23,6 +23,7 @@ pub struct PythonRequest {
 pub enum PythonRequestSource {
     Override,
     DotPythonVersion,
+    DotVenv,
     RequiresPython,
 }
 
@@ -87,6 +88,13 @@ fn resolve_python_request(
         }));
     }
 
+    if let Some(value) = read_project_venv_python_version(project_root)? {
+        return Ok(Some(PythonRequest {
+            value,
+            source: PythonRequestSource::DotVenv,
+        }));
+    }
+
     Ok(requires_python.map(|value| PythonRequest {
         value,
         source: PythonRequestSource::RequiresPython,
@@ -113,4 +121,29 @@ fn read_python_version_file(project_root: &Path) -> Result<Option<String>> {
         })?;
 
     Ok(Some(request))
+}
+
+fn read_project_venv_python_version(project_root: &Path) -> Result<Option<String>> {
+    let path = project_root.join(".venv").join("pyvenv.cfg");
+    if !path.is_file() {
+        return Ok(None);
+    }
+
+    let contents = fs::read_to_string(&path).into_diagnostic()?;
+    for line in contents.lines().map(str::trim) {
+        if let Some(value) = line
+            .strip_prefix("version_info =")
+            .or_else(|| line.strip_prefix("version ="))
+        {
+            let version = value.trim();
+            if !version.is_empty() {
+                return Ok(Some(version.to_string()));
+            }
+        }
+    }
+
+    Err(miette!(
+        "`{}` exists but does not declare a Python version",
+        path.display()
+    ))
 }
