@@ -1,6 +1,8 @@
 pub mod cli;
 pub mod commands;
 pub mod logging;
+pub mod plan;
+pub mod project;
 
 use clap::Parser;
 use cli::{Cli, Command};

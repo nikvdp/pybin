@@ -1,17 +1,46 @@
-use crate::cli::InspectArgs;
-use miette::{IntoDiagnostic, Result, miette};
-use std::env;
+use crate::{
+    cli::InspectArgs,
+    plan::BuildPlan,
+    project::{PythonRequestSource, load_project_metadata},
+};
+use miette::Result;
 
 pub fn run(args: InspectArgs) -> Result<()> {
-    let cwd = env::current_dir().into_diagnostic()?;
+    let metadata = load_project_metadata(&args.project, args.python.as_deref())?;
+    let plan = BuildPlan::resolve(metadata, args.entrypoint.as_deref())?;
 
-    Err(miette!(
-        "inspect is not implemented yet.\n\
-         project: {}\n\
-         cwd: {}\n\
-         python override: {}",
-        args.project.display(),
-        cwd.display(),
-        args.python.as_deref().unwrap_or("<from project>"),
-    ))
+    println!("project root: {}", plan.project_root.display());
+    println!("package: {}", plan.package_name);
+    println!(
+        "entrypoint: {} -> {}",
+        plan.entrypoint_name, plan.entrypoint_target
+    );
+    println!(
+        "python request: {}",
+        plan.python_request
+            .as_ref()
+            .map(format_python_request)
+            .unwrap_or_else(|| "<none>".to_string())
+    );
+    println!("uv.lock present: {}", yes_no(plan.uv_lock_present));
+    println!(
+        "inner uv env: <conda-prefix>/{}",
+        plan.inner_env_relative_path.display()
+    );
+
+    Ok(())
+}
+
+fn format_python_request(request: &crate::project::PythonRequest) -> String {
+    let source = match request.source {
+        PythonRequestSource::Override => "override",
+        PythonRequestSource::DotPythonVersion => ".python-version",
+        PythonRequestSource::RequiresPython => "project.requires-python",
+    };
+
+    format!("{} ({source})", request.value)
+}
+
+fn yes_no(value: bool) -> &'static str {
+    if value { "yes" } else { "no" }
 }

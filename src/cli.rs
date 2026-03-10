@@ -87,6 +87,13 @@ pub struct InspectArgs {
 
     #[arg(
         long,
+        value_name = "NAME",
+        help = "Explicit entrypoint or script name to inspect."
+    )]
+    pub entrypoint: Option<String>,
+
+    #[arg(
+        long,
         value_name = "VERSION",
         help = "Override the Python version request before inspection."
     )]
