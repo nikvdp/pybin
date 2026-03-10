@@ -83,6 +83,13 @@ pub struct BuildArgs {
 
     #[arg(
         long,
+        value_name = "COMMAND",
+        help = "Run this shell command inside the build prefix instead of pybin's built-in install strategy."
+    )]
+    pub install_command: Option<String>,
+
+    #[arg(
+        long,
         value_enum,
         default_value_t = PayloadCompression::Zstd,
         help = "Compression format for the embedded runtime payload."
@@ -112,4 +119,11 @@ pub struct InspectArgs {
         help = "Override the Python request before inspection."
     )]
     pub python: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "COMMAND",
+        help = "Preview a custom shell install command instead of pybin's built-in install strategy."
+    )]
+    pub install_command: Option<String>,
 }

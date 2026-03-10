@@ -25,7 +25,11 @@ pub fn run(args: BuildArgs) -> Result<()> {
     } else {
         EntrypointSource::AutoDetected
     };
-    let plan = BuildPlan::resolve(metadata, args.entrypoint.as_deref())?;
+    let plan = BuildPlan::resolve(
+        metadata,
+        args.entrypoint.as_deref(),
+        args.install_command.as_deref(),
+    )?;
     let output_path = resolve_output_path(&plan, args.output.as_deref())?;
     ui.print_build_header(&plan, &output_path, entrypoint_source, args.compression);
     let prepared = prepare_build(

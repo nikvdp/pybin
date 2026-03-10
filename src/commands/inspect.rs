@@ -21,8 +21,14 @@ pub fn run(args: InspectArgs) -> Result<()> {
         "auto-detected from project metadata"
     };
     let conda_check = check_conda();
-    let plan_result = load_project_metadata(&args.project, args.python.as_deref())
-        .and_then(|metadata| BuildPlan::resolve(metadata, args.entrypoint.as_deref()));
+    let plan_result =
+        load_project_metadata(&args.project, args.python.as_deref()).and_then(|metadata| {
+            BuildPlan::resolve(
+                metadata,
+                args.entrypoint.as_deref(),
+                args.install_command.as_deref(),
+            )
+        });
 
     println!("{}", heading("Resolved build plan"));
     match &plan_result {

@@ -23,6 +23,7 @@ pub enum InstallStrategy {
     UvSync { frozen: bool },
     UvPipInstallProject,
     UvPipInstallRequirements { relative_path: PathBuf },
+    CustomCommand { command: String },
 }
 
 #[derive(Debug, Clone)]
@@ -40,15 +41,20 @@ impl InstallStrategy {
             Self::UvPipInstallRequirements { relative_path } => {
                 format!("uv pip install -r {}", relative_path.display())
             }
+            Self::CustomCommand { command } => format!("custom install command: {command}"),
         }
     }
 }
 
 impl BuildPlan {
-    pub fn resolve(metadata: ProjectMetadata, entrypoint_override: Option<&str>) -> Result<Self> {
+    pub fn resolve(
+        metadata: ProjectMetadata,
+        entrypoint_override: Option<&str>,
+        install_command_override: Option<&str>,
+    ) -> Result<Self> {
         let (entrypoint_name, entrypoint_target, source_overlay) =
             select_entrypoint(&metadata, entrypoint_override)?;
-        let install_strategy = select_install_strategy(&metadata);
+        let install_strategy = select_install_strategy(&metadata, install_command_override);
 
         Ok(Self {
             project_root: metadata.project_root,
@@ -69,7 +75,16 @@ impl BuildPlan {
     }
 }
 
-fn select_install_strategy(metadata: &ProjectMetadata) -> InstallStrategy {
+fn select_install_strategy(
+    metadata: &ProjectMetadata,
+    install_command_override: Option<&str>,
+) -> InstallStrategy {
+    if let Some(command) = install_command_override {
+        return InstallStrategy::CustomCommand {
+            command: command.to_string(),
+        };
+    }
+
     if metadata.uv_lock_present {
         return InstallStrategy::UvSync { frozen: true };
     }

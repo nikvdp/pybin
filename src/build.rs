@@ -697,6 +697,14 @@ fn install_project(
                 relative_path,
             )
         }
+        InstallStrategy::CustomCommand { command } => install_with_custom_command(
+            plan,
+            logs_dir,
+            conda_prefix,
+            conda_python,
+            inner_env_path,
+            command,
+        ),
     }
 }
 
@@ -842,6 +850,72 @@ fn create_inner_uv_env(
         ],
         &[],
     )
+}
+
+fn install_with_custom_command(
+    plan: &BuildPlan,
+    logs_dir: &Path,
+    conda_prefix: &Path,
+    conda_python: &Path,
+    inner_env_path: &Path,
+    command: &str,
+) -> Result<()> {
+    create_inner_uv_env(
+        logs_dir,
+        &plan.project_root,
+        conda_prefix,
+        conda_python,
+        inner_env_path,
+    )?;
+    let inner_python = conda_python_path(inner_env_path);
+    let (shell_program, shell_flag) = shell_command_parts();
+
+    run_logged(
+        "custom-install-command",
+        logs_dir,
+        &plan.project_root,
+        "conda",
+        &[
+            OsString::from("run"),
+            OsString::from("-p"),
+            conda_prefix.as_os_str().to_os_string(),
+            OsString::from(shell_program),
+            OsString::from(shell_flag),
+            OsString::from(command),
+        ],
+        &[
+            (
+                "PYBIN_PROJECT_ROOT",
+                plan.project_root.as_os_str().to_os_string(),
+            ),
+            (
+                "PYBIN_CONDA_PREFIX",
+                conda_prefix.as_os_str().to_os_string(),
+            ),
+            (
+                "PYBIN_CONDA_PYTHON",
+                conda_python.as_os_str().to_os_string(),
+            ),
+            ("PYBIN_UV_ENV", inner_env_path.as_os_str().to_os_string()),
+            (
+                "PYBIN_INNER_PYTHON",
+                inner_python.as_os_str().to_os_string(),
+            ),
+            (
+                "UV_PROJECT_ENVIRONMENT",
+                inner_env_path.as_os_str().to_os_string(),
+            ),
+            ("UV_LINK_MODE", OsString::from("copy")),
+        ],
+    )
+}
+
+fn shell_command_parts() -> (&'static str, &'static str) {
+    if cfg!(windows) {
+        ("cmd", "/C")
+    } else {
+        ("sh", "-lc")
+    }
 }
 
 fn run_logged(
