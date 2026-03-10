@@ -1,5 +1,5 @@
 use pybin::{
-    build::{PrepareBuildOptions, prepare_build},
+    build::{PrepareBuildOptions, SilentBuildProgress, prepare_build},
     packer::{PackOptions, pack_directory},
     plan::BuildPlan,
     project::load_project_metadata,
@@ -20,11 +20,13 @@ fn builds_and_runs_the_demo_fixture_as_a_single_binary() {
 
     let metadata = load_project_metadata(&fixture, None).expect("fixture metadata");
     let plan = BuildPlan::resolve(metadata, None).expect("fixture plan");
+    let mut progress = SilentBuildProgress;
     let prepared = prepare_build(
         &plan,
         &PrepareBuildOptions {
             work_dir: Some(work_dir),
         },
+        &mut progress,
     )
     .expect("prepared build");
 
