@@ -91,7 +91,7 @@ impl BuildUi {
         let mode = if spinner_supported() {
             let spinner = ProgressBar::with_draw_target(None, ProgressDrawTarget::stderr());
             spinner.set_style(
-                ProgressStyle::with_template("{spinner} [{pos}/{len}] {msg}")
+                ProgressStyle::with_template("[{pos}/{len}] {msg} {spinner}")
                     .expect("spinner template"),
             );
             spinner.set_length(BuildPhase::ALL_PHASES.len() as u64);
