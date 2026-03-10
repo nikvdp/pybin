@@ -880,7 +880,10 @@ fn slugify(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::project::{PythonRequest, PythonRequestSource};
+    use crate::{
+        plan::InstallStrategy,
+        project::{ProjectMetadataSource, PythonRequest, PythonRequestSource},
+    };
 
     #[test]
     fn formats_exact_python_versions_for_conda() {
@@ -891,6 +894,8 @@ mod tests {
                 value: "3.12".to_string(),
                 source: PythonRequestSource::DotPythonVersion,
             }),
+            metadata_source: ProjectMetadataSource::Pep621Project,
+            install_strategy: InstallStrategy::UvSync { frozen: true },
             entrypoint_name: "demo".to_string(),
             entrypoint_target: "demo.cli:main".to_string(),
             uv_lock_present: true,
@@ -909,6 +914,8 @@ mod tests {
                 value: ">=3.12,<3.13".to_string(),
                 source: PythonRequestSource::RequiresPython,
             }),
+            metadata_source: ProjectMetadataSource::Pep621Project,
+            install_strategy: InstallStrategy::UvPipInstallProject,
             entrypoint_name: "demo".to_string(),
             entrypoint_target: "demo.cli:main".to_string(),
             uv_lock_present: false,
@@ -916,5 +923,25 @@ mod tests {
         };
 
         assert_eq!(conda_python_spec(&plan), "python>=3.12,<3.13");
+    }
+
+    #[test]
+    fn normalizes_poetry_caret_python_requirements_for_conda() {
+        let plan = BuildPlan {
+            project_root: PathBuf::from("."),
+            package_name: "demo".to_string(),
+            python_request: Some(PythonRequest {
+                value: "^3.7".to_string(),
+                source: PythonRequestSource::PoetryDependency,
+            }),
+            metadata_source: ProjectMetadataSource::Poetry,
+            install_strategy: InstallStrategy::UvPipInstallProject,
+            entrypoint_name: "demo".to_string(),
+            entrypoint_target: "demo.cli:main".to_string(),
+            uv_lock_present: false,
+            inner_env_relative_path: PathBuf::from("uv-env"),
+        };
+
+        assert_eq!(conda_python_spec(&plan), "python>=3.7,<4");
     }
 }

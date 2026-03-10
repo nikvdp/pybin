@@ -199,4 +199,56 @@ requires-python = ">=3.12,<3.13"
             Some(">=3.12,<3.13")
         );
     }
+
+    #[test]
+    fn selects_uv_sync_for_locked_projects() {
+        let dir = tempdir().expect("tempdir");
+        fs::write(
+            dir.path().join("pyproject.toml"),
+            r#"
+[project]
+name = "demo-app"
+version = "0.1.0"
+scripts = { demo = "demo.cli:main" }
+"#,
+        )
+        .expect("write pyproject");
+        fs::write(dir.path().join("uv.lock"), "version = 1\n").expect("write uv.lock");
+
+        let metadata = load_project_metadata(dir.path(), None).expect("metadata");
+        let plan = BuildPlan::resolve(metadata, None).expect("plan");
+
+        assert!(matches!(
+            plan.install_strategy,
+            InstallStrategy::UvSync { frozen: true }
+        ));
+    }
+
+    #[test]
+    fn selects_uv_pip_install_project_for_unlocked_pyproject_projects() {
+        let dir = tempdir().expect("tempdir");
+        fs::write(
+            dir.path().join("pyproject.toml"),
+            r#"
+[tool.poetry]
+name = "legacy-poetry-app"
+version = "0.1.0"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+
+[tool.poetry.scripts]
+legacy-poetry-app = "legacy.cli:main"
+"#,
+        )
+        .expect("write pyproject");
+
+        let metadata = load_project_metadata(dir.path(), None).expect("metadata");
+        let plan = BuildPlan::resolve(metadata, None).expect("plan");
+
+        assert!(matches!(
+            plan.install_strategy,
+            InstallStrategy::UvPipInstallProject
+        ));
+    }
 }
