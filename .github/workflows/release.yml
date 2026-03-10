@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create or update GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+
+  build-release-assets:
+    name: Build ${{ matrix.target }}
+    needs: create-release
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            archive_ext: tar.gz
+            binary_name: pybin
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            archive_ext: tar.gz
+            binary_name: pybin
+          - runner: macos-13
+            target: x86_64-apple-darwin
+            archive_ext: tar.gz
+            binary_name: pybin
+          - runner: macos-14
+            target: aarch64-apple-darwin
+            archive_ext: tar.gz
+            binary_name: pybin
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive_ext: zip
+            binary_name: pybin.exe
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binary
+        run: cargo build --release --locked --bin pybin
+
+      - name: Package archive on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          asset="pybin-${GITHUB_REF_NAME}-${{ matrix.target }}.${{ matrix.archive_ext }}"
+          mkdir -p dist
+          cp "target/release/${{ matrix.binary_name }}" "dist/${{ matrix.binary_name }}"
+          tar -C dist -czf "$asset" "${{ matrix.binary_name }}"
+          echo "RELEASE_ASSET=$asset" >> "$GITHUB_ENV"
+
+      - name: Package archive on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $asset = "pybin-$env:GITHUB_REF_NAME-${{ matrix.target }}.${{ matrix.archive_ext }}"
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item "target/release/${{ matrix.binary_name }}" "dist/${{ matrix.binary_name }}"
+          Compress-Archive -Path "dist/${{ matrix.binary_name }}" -DestinationPath $asset -Force
+          "RELEASE_ASSET=$asset" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.RELEASE_ASSET }}

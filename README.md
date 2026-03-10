@@ -87,6 +87,16 @@ Check project readiness and host prerequisites:
 pybin doctor /path/to/project
 ```
 
+## Releases
+
+Pushing a `v*` tag is intended to publish GitHub release assets for:
+
+- macOS `x86_64` and `arm64`
+- Linux `x86_64` and `arm64`
+- Windows `x86_64` as best-effort
+
+Each release asset contains one `pybin` executable for that target platform.
+
 ## Fixture Validation
 
 The repo includes a sample uv project in `fixtures/demo-app`.
