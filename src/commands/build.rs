@@ -27,7 +27,7 @@ pub fn run(args: BuildArgs) -> Result<()> {
     };
     let plan = BuildPlan::resolve(metadata, args.entrypoint.as_deref())?;
     let output_path = resolve_output_path(&plan, args.output.as_deref())?;
-    ui.print_build_header(&plan, &output_path, entrypoint_source);
+    ui.print_build_header(&plan, &output_path, entrypoint_source, args.compression);
     let prepared = prepare_build(
         &plan,
         &PrepareBuildOptions {
@@ -47,6 +47,7 @@ pub fn run(args: BuildArgs) -> Result<()> {
             &PackOptions {
                 stub_path: None,
                 unique_id: true,
+                payload_compression: args.compression,
             },
         )
     })?;
@@ -143,6 +144,7 @@ impl BuildUi {
         plan: &BuildPlan,
         output_path: &Path,
         entrypoint_source: EntrypointSource,
+        payload_compression: crate::sfx::PayloadCompression,
     ) {
         self.println(&heading("Build plan"));
         self.println(&format!(
@@ -174,6 +176,11 @@ impl BuildUi {
                 .as_ref()
                 .map(format_python_request)
                 .unwrap_or_else(|| "<none>".to_string())
+        ));
+        self.println(&format!(
+            "  {} {}",
+            label("Payload compression:"),
+            value(payload_compression.as_str())
         ));
     }
 

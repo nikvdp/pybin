@@ -1,3 +1,4 @@
+use crate::sfx::PayloadCompression;
 use clap::{ArgAction, Args, Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -79,6 +80,14 @@ pub struct BuildArgs {
         help = "Keep intermediate build artifacts in this directory."
     )]
     pub work_dir: Option<PathBuf>,
+
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = PayloadCompression::Zstd,
+        help = "Compression format for the embedded runtime payload."
+    )]
+    pub compression: PayloadCompression,
 }
 
 #[derive(Debug, Args)]

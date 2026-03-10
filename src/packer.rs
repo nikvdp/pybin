@@ -1,4 +1,4 @@
-use crate::sfx;
+use crate::sfx::{self, PayloadCompression};
 use flate2::{Compression, write::GzEncoder};
 use miette::{IntoDiagnostic, Result, WrapErr, miette};
 use std::{
@@ -6,6 +6,7 @@ use std::{
     fs::{self, File},
     io::{self, Write, copy},
     path::{Path, PathBuf},
+    thread,
     time::{SystemTime, UNIX_EPOCH},
 };
 use tar::Builder;
@@ -15,6 +16,7 @@ use tempfile::NamedTempFile;
 pub struct PackOptions {
     pub stub_path: Option<PathBuf>,
     pub unique_id: bool,
+    pub payload_compression: PayloadCompression,
 }
 
 #[derive(Debug, Clone)]
@@ -59,16 +61,20 @@ pub fn pack_directory(
             stub_path.display()
         )
     })?;
-    let tarball = create_tgz(input_dir)?;
+    let archive = create_payload_archive(input_dir, options.payload_compression)?;
     let metadata = sfx::encode_metadata(exec_relpath, &build_uid);
-    let payload_len = tarball.as_file().metadata().into_diagnostic()?.len();
-    let footer = sfx::footer_bytes(payload_len, metadata.len() as u32);
+    let payload_len = archive.as_file().metadata().into_diagnostic()?.len();
+    let footer = sfx::footer_bytes(
+        payload_len,
+        metadata.len() as u32,
+        options.payload_compression,
+    );
 
     let mut output = create_output_file(output_path).into_diagnostic()?;
     output.write_all(&runner_bytes).into_diagnostic()?;
 
-    let mut tarball_file = File::open(tarball.path()).into_diagnostic()?;
-    copy(&mut tarball_file, &mut output).into_diagnostic()?;
+    let mut archive_file = File::open(archive.path()).into_diagnostic()?;
+    copy(&mut archive_file, &mut output).into_diagnostic()?;
     output.write_all(&metadata).into_diagnostic()?;
     output.write_all(&footer).into_diagnostic()?;
     drop(output);
@@ -82,14 +88,40 @@ fn current_stub_path() -> Result<std::path::PathBuf> {
         .wrap_err("could not determine the current pybin executable for SFX packing")
 }
 
-fn create_tgz(input_dir: &Path) -> Result<NamedTempFile> {
-    let tarball = NamedTempFile::new().into_diagnostic()?;
-    let gz = GzEncoder::new(tarball.reopen().into_diagnostic()?, Compression::best());
-    let mut tar = Builder::new(gz);
-    tar.follow_symlinks(false);
-    tar.append_dir_all(".", input_dir).into_diagnostic()?;
-    tar.finish().into_diagnostic()?;
-    Ok(tarball)
+fn create_payload_archive(
+    input_dir: &Path,
+    compression: PayloadCompression,
+) -> Result<NamedTempFile> {
+    let archive = NamedTempFile::new().into_diagnostic()?;
+
+    match compression {
+        PayloadCompression::Gzip => {
+            let writer = archive.reopen().into_diagnostic()?;
+            let encoder = GzEncoder::new(writer, Compression::best());
+            let mut tar = Builder::new(encoder);
+            tar.follow_symlinks(false);
+            tar.append_dir_all(".", input_dir).into_diagnostic()?;
+            let encoder = tar.into_inner().into_diagnostic()?;
+            encoder.finish().into_diagnostic()?;
+        }
+        PayloadCompression::Zstd => {
+            let writer = archive.reopen().into_diagnostic()?;
+            let mut encoder = zstd::stream::write::Encoder::new(writer, 19).into_diagnostic()?;
+            if let Ok(workers) = thread::available_parallelism() {
+                let workers = workers.get();
+                if workers > 1 {
+                    encoder.multithread(workers as u32).into_diagnostic()?;
+                }
+            }
+            let mut tar = Builder::new(encoder);
+            tar.follow_symlinks(false);
+            tar.append_dir_all(".", input_dir).into_diagnostic()?;
+            let encoder = tar.into_inner().into_diagnostic()?;
+            encoder.finish().into_diagnostic()?;
+        }
+    }
+
+    Ok(archive)
 }
 
 fn create_output_file(path: &Path) -> io::Result<File> {

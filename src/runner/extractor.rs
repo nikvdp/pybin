@@ -1,4 +1,4 @@
-use crate::sfx::BundleMetadata;
+use crate::sfx::{BundleMetadata, PayloadCompression};
 use flate2::read::GzDecoder;
 use std::{
     fs,
@@ -21,7 +21,16 @@ pub fn extract_to(source: &Path, bundle: &BundleMetadata, destination: &Path) ->
     })?;
 
     let cursor = Cursor::new(payload);
-    let gz = GzDecoder::new(cursor);
-    let mut archive = Archive::new(gz);
-    archive.unpack(destination)
+    match bundle.payload_compression {
+        PayloadCompression::Gzip => {
+            let gz = GzDecoder::new(cursor);
+            let mut archive = Archive::new(gz);
+            archive.unpack(destination)
+        }
+        PayloadCompression::Zstd => {
+            let zstd = zstd::stream::read::Decoder::new(cursor)?;
+            let mut archive = Archive::new(zstd);
+            archive.unpack(destination)
+        }
+    }
 }
