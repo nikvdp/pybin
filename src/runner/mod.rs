@@ -3,11 +3,14 @@ pub mod extractor;
 
 use crate::sfx;
 use dirs::data_local_dir;
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use miette::{IntoDiagnostic, Result, miette};
 use std::{
     env, fs,
+    io::IsTerminal,
     path::{Path, PathBuf},
     process::{self, Command, Stdio},
+    time::Duration,
 };
 
 pub fn run() -> Result<()> {
@@ -57,9 +60,14 @@ fn cache_path(target: &str) -> Result<PathBuf> {
 }
 
 fn extract(executable: &Path, bundle: &sfx::BundleMetadata, cache_path: &Path) -> Result<()> {
+    let mut progress = RunnerProgress::new();
     fs::remove_dir_all(cache_path).ok();
+    progress.start("Extracting packaged runtime for first use");
     extractor::extract_to(executable, bundle, cache_path).into_diagnostic()?;
+    progress.finish("Extracted packaged runtime for first use");
+    progress.start("Finalizing packaged runtime for first use");
     run_conda_unpack(cache_path)?;
+    progress.finish("Finalized packaged runtime for first use");
     Ok(())
 }
 
@@ -84,4 +92,47 @@ fn run_conda_unpack(cache_path: &Path) -> Result<()> {
         "conda-unpack failed inside `{}`",
         cache_path.display()
     ))
+}
+
+struct RunnerProgress {
+    enabled: bool,
+    spinner: Option<ProgressBar>,
+}
+
+impl RunnerProgress {
+    fn new() -> Self {
+        Self {
+            enabled: progress_enabled(),
+            spinner: None,
+        }
+    }
+
+    fn start(&mut self, message: &str) {
+        if self.enabled {
+            let spinner = ProgressBar::with_draw_target(None, ProgressDrawTarget::stderr());
+            spinner.set_style(
+                ProgressStyle::with_template("{msg} {spinner}").expect("runner spinner template"),
+            );
+            spinner.enable_steady_tick(Duration::from_millis(100));
+            spinner.set_message(format!("{message} (one-time startup step)"));
+            self.spinner = Some(spinner);
+        }
+    }
+
+    fn finish(&mut self, message: &str) {
+        if let Some(spinner) = self.spinner.take() {
+            spinner.println(format!("{message} (later launches reuse the cache)"));
+            spinner.finish_and_clear();
+        }
+    }
+}
+
+fn progress_enabled() -> bool {
+    if env::var_os("PYBIN_NO_PROGRESS").is_some() {
+        return false;
+    }
+
+    std::io::stderr().is_terminal()
+        && std::io::stdout().is_terminal()
+        && env::var("TERM").map(|term| term != "dumb").unwrap_or(true)
 }
