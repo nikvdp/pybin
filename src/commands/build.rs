@@ -17,21 +17,14 @@ use std::{
 
 pub fn run(args: BuildArgs) -> Result<()> {
     let mut ui = BuildUi::new();
-    run_phase(&mut ui, BuildPhase::CheckHostPrerequisites, || {
-        require_host_prerequisites(&args.project)
-    })?;
-
-    let metadata = run_phase(&mut ui, BuildPhase::ReadProjectMetadata, || {
-        load_project_metadata(&args.project, args.python.as_deref())
-    })?;
+    require_host_prerequisites(&args.project)?;
+    let metadata = load_project_metadata(&args.project, args.python.as_deref())?;
     let entrypoint_source = if args.entrypoint.is_some() {
         EntrypointSource::ExplicitOverride
     } else {
         EntrypointSource::AutoDetected
     };
-    let plan = run_phase(&mut ui, BuildPhase::ResolveBuildPlan, || {
-        BuildPlan::resolve(metadata, args.entrypoint.as_deref())
-    })?;
+    let plan = BuildPlan::resolve(metadata, args.entrypoint.as_deref())?;
     let output_path = resolve_output_path(&plan, args.output.as_deref())?;
     ui.print_build_header(&plan, &output_path, entrypoint_source);
     let prepared = prepare_build(
@@ -58,32 +51,26 @@ pub fn run(args: BuildArgs) -> Result<()> {
     })?;
     ui.finish();
 
-    println!("Built `{}`", plan.package_name);
-    println!("Output: {}", output_path.display());
-    println!("Run: {}", output_path.display());
+    let packaged_entry_shim = prepared.stage_dir.join(&prepared.launcher_relpath);
+
+    println!();
+    println!("Done");
+    println!("  Final executable: {}", output_path.display());
+    println!("  Run it: {}", output_path.display());
+    println!("  Build id: {}", manifest.build_uid);
+    println!("  Logs directory: {}", prepared.logs_dir.display());
+
+    println!();
+    println!("Debug paths");
+    println!("  Work directory: {}", prepared.work_dir.display());
+    println!("  Conda build prefix: {}", prepared.conda_prefix.display());
+    println!("  Inner uv env: {}", prepared.inner_env_path.display());
     println!(
-        "Entrypoint: {} -> {}",
-        plan.entrypoint_name, plan.entrypoint_target
+        "  Packed conda archive: {}",
+        prepared.packed_env_path.display()
     );
-    println!("Entrypoint source: {}", entrypoint_source.description());
-    println!(
-        "Python request: {}",
-        plan.python_request
-            .as_ref()
-            .map(format_python_request)
-            .unwrap_or_else(|| "<none>".to_string())
-    );
-    println!("Build id: {}", manifest.build_uid);
-    println!("Work dir: {}", prepared.work_dir.display());
-    println!("Logs dir: {}", prepared.logs_dir.display());
-    println!("Conda prefix: {}", prepared.conda_prefix.display());
-    println!("Inner uv env: {}", prepared.inner_env_path.display());
-    println!("Packed env: {}", prepared.packed_env_path.display());
-    println!("Stage dir: {}", prepared.stage_dir.display());
-    println!(
-        "Packaged entry shim: {}",
-        prepared.launcher_relpath.display()
-    );
+    println!("  Staging directory: {}", prepared.stage_dir.display());
+    println!("  Packaged entry shim: {}", packaged_entry_shim.display());
 
     Ok(())
 }
@@ -127,25 +114,23 @@ impl BuildUi {
         output_path: &Path,
         entrypoint_source: EntrypointSource,
     ) {
+        self.println("Build plan");
+        self.println(&format!("  Project root: {}", plan.project_root.display()));
+        self.println(&format!("  Package: {}", plan.package_name));
+        self.println(&format!("  Final executable: {}", output_path.display()));
         self.println(&format!(
-            "Building `{}` from `{}`",
-            plan.package_name,
-            plan.project_root.display()
-        ));
-        self.println(&format!(
-            "Entrypoint: {} -> {} ({})",
+            "  Entrypoint: {} -> {} ({})",
             plan.entrypoint_name,
             plan.entrypoint_target,
             entrypoint_source.description()
         ));
         self.println(&format!(
-            "Python request: {}",
+            "  Python request: {}",
             plan.python_request
                 .as_ref()
                 .map(format_python_request)
                 .unwrap_or_else(|| "<none>".to_string())
         ));
-        self.println(&format!("Output: {}", output_path.display()));
     }
 
     fn finish(&mut self) {
@@ -172,13 +157,13 @@ impl BuildProgress for BuildUi {
         _plan: &BuildPlan,
         work_dir: &Path,
         logs_dir: &Path,
-        conda_prefix: &Path,
-        inner_env_path: &Path,
+        _conda_prefix: &Path,
+        _inner_env_path: &Path,
     ) {
-        self.println(&format!("Work dir: {}", work_dir.display()));
-        self.println(&format!("Logs dir: {}", logs_dir.display()));
-        self.println(&format!("Conda prefix: {}", conda_prefix.display()));
-        self.println(&format!("Inner uv env: {}", inner_env_path.display()));
+        self.println(&format!("  Work directory: {}", work_dir.display()));
+        self.println(&format!("  Logs directory: {}", logs_dir.display()));
+        self.println("");
+        self.println("Progress");
     }
 
     fn on_phase_start(&mut self, phase: BuildPhase) {

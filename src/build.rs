@@ -18,9 +18,6 @@ pub struct PrepareBuildOptions {
 
 #[derive(Debug, Clone, Copy)]
 pub enum BuildPhase {
-    CheckHostPrerequisites,
-    ReadProjectMetadata,
-    ResolveBuildPlan,
     CreateCondaPrefix,
     SyncUvProject,
     PackCondaPrefix,
@@ -38,10 +35,7 @@ impl BuildPhase {
         BuildPhase::WriteLauncher,
     ];
 
-    pub const ALL_PHASES: [BuildPhase; 9] = [
-        BuildPhase::CheckHostPrerequisites,
-        BuildPhase::ReadProjectMetadata,
-        BuildPhase::ResolveBuildPlan,
+    pub const ALL_PHASES: [BuildPhase; 6] = [
         BuildPhase::CreateCondaPrefix,
         BuildPhase::SyncUvProject,
         BuildPhase::PackCondaPrefix,
@@ -52,9 +46,6 @@ impl BuildPhase {
 
     pub fn title(self) -> &'static str {
         match self {
-            BuildPhase::CheckHostPrerequisites => "Check host prerequisites",
-            BuildPhase::ReadProjectMetadata => "Read project metadata",
-            BuildPhase::ResolveBuildPlan => "Resolve build plan",
             BuildPhase::CreateCondaPrefix => "Create conda build prefix",
             BuildPhase::SyncUvProject => "Sync uv project into build environment",
             BuildPhase::PackCondaPrefix => "Pack relocatable conda prefix",
@@ -66,11 +57,6 @@ impl BuildPhase {
 
     pub fn start_message(self) -> &'static str {
         match self {
-            BuildPhase::CheckHostPrerequisites => "Checking host prerequisites and project layout",
-            BuildPhase::ReadProjectMetadata => "Inspecting pyproject metadata and uv lock state",
-            BuildPhase::ResolveBuildPlan => {
-                "Resolving the entrypoint and Python request for the package"
-            }
             BuildPhase::CreateCondaPrefix => {
                 "Creating conda build prefix with Python, uv, and conda-pack"
             }
@@ -86,9 +72,6 @@ impl BuildPhase {
 
     pub fn success_message(self) -> &'static str {
         match self {
-            BuildPhase::CheckHostPrerequisites => "Checked host prerequisites",
-            BuildPhase::ReadProjectMetadata => "Read project metadata",
-            BuildPhase::ResolveBuildPlan => "Resolved build plan",
             BuildPhase::CreateCondaPrefix => "Created conda build prefix",
             BuildPhase::SyncUvProject => "Synced uv project into packaged runtime",
             BuildPhase::PackCondaPrefix => "Packed relocatable conda prefix",
