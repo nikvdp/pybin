@@ -6,7 +6,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::{Command, Output},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tar::Archive;
 use tracing::info;
@@ -15,6 +15,112 @@ use tracing::info;
 pub struct PrepareBuildOptions {
     pub work_dir: Option<PathBuf>,
 }
+
+#[derive(Debug, Clone, Copy)]
+pub enum BuildPhase {
+    CheckHostPrerequisites,
+    ReadProjectMetadata,
+    ResolveBuildPlan,
+    CreateCondaPrefix,
+    SyncUvProject,
+    PackCondaPrefix,
+    UnpackPackedPrefix,
+    WriteLauncher,
+    AssembleExecutable,
+}
+
+impl BuildPhase {
+    pub const PREPARE_PHASES: [BuildPhase; 5] = [
+        BuildPhase::CreateCondaPrefix,
+        BuildPhase::SyncUvProject,
+        BuildPhase::PackCondaPrefix,
+        BuildPhase::UnpackPackedPrefix,
+        BuildPhase::WriteLauncher,
+    ];
+
+    pub const ALL_PHASES: [BuildPhase; 9] = [
+        BuildPhase::CheckHostPrerequisites,
+        BuildPhase::ReadProjectMetadata,
+        BuildPhase::ResolveBuildPlan,
+        BuildPhase::CreateCondaPrefix,
+        BuildPhase::SyncUvProject,
+        BuildPhase::PackCondaPrefix,
+        BuildPhase::UnpackPackedPrefix,
+        BuildPhase::WriteLauncher,
+        BuildPhase::AssembleExecutable,
+    ];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            BuildPhase::CheckHostPrerequisites => "Check host prerequisites",
+            BuildPhase::ReadProjectMetadata => "Read project metadata",
+            BuildPhase::ResolveBuildPlan => "Resolve build plan",
+            BuildPhase::CreateCondaPrefix => "Create conda build prefix",
+            BuildPhase::SyncUvProject => "Sync uv project into build environment",
+            BuildPhase::PackCondaPrefix => "Pack relocatable conda prefix",
+            BuildPhase::UnpackPackedPrefix => "Unpack staged runtime tree",
+            BuildPhase::WriteLauncher => "Write packaged launcher shim",
+            BuildPhase::AssembleExecutable => "Assemble self-extracting executable",
+        }
+    }
+
+    pub fn start_message(self) -> &'static str {
+        match self {
+            BuildPhase::CheckHostPrerequisites => "Checking host prerequisites and project layout",
+            BuildPhase::ReadProjectMetadata => "Inspecting pyproject metadata and uv lock state",
+            BuildPhase::ResolveBuildPlan => {
+                "Resolving the entrypoint and Python request for the package"
+            }
+            BuildPhase::CreateCondaPrefix => {
+                "Creating conda build prefix with Python, uv, and conda-pack"
+            }
+            BuildPhase::SyncUvProject => {
+                "Creating the packaged uv environment and installing the app"
+            }
+            BuildPhase::PackCondaPrefix => "Packing the relocatable conda prefix",
+            BuildPhase::UnpackPackedPrefix => "Unpacking the packed prefix into the staging area",
+            BuildPhase::WriteLauncher => "Writing the packaged entry shim",
+            BuildPhase::AssembleExecutable => "Assembling the final self-extracting binary",
+        }
+    }
+
+    pub fn success_message(self) -> &'static str {
+        match self {
+            BuildPhase::CheckHostPrerequisites => "Checked host prerequisites",
+            BuildPhase::ReadProjectMetadata => "Read project metadata",
+            BuildPhase::ResolveBuildPlan => "Resolved build plan",
+            BuildPhase::CreateCondaPrefix => "Created conda build prefix",
+            BuildPhase::SyncUvProject => "Synced uv project into packaged runtime",
+            BuildPhase::PackCondaPrefix => "Packed relocatable conda prefix",
+            BuildPhase::UnpackPackedPrefix => "Unpacked staged runtime tree",
+            BuildPhase::WriteLauncher => "Wrote packaged entry shim",
+            BuildPhase::AssembleExecutable => "Assembled self-extracting executable",
+        }
+    }
+}
+
+pub trait BuildProgress {
+    fn on_layout_ready(
+        &mut self,
+        _plan: &BuildPlan,
+        _work_dir: &Path,
+        _logs_dir: &Path,
+        _conda_prefix: &Path,
+        _inner_env_path: &Path,
+    ) {
+    }
+
+    fn on_phase_start(&mut self, _phase: BuildPhase) {}
+
+    fn on_phase_complete(&mut self, _phase: BuildPhase, _elapsed: Duration) {}
+
+    fn on_phase_failed(&mut self, _phase: BuildPhase, _elapsed: Duration, _error: &miette::Report) {
+    }
+}
+
+pub struct SilentBuildProgress;
+
+impl BuildProgress for SilentBuildProgress {}
 
 #[derive(Debug, Clone)]
 pub struct PreparedBuild {
@@ -27,7 +133,11 @@ pub struct PreparedBuild {
     pub launcher_relpath: PathBuf,
 }
 
-pub fn prepare_build(plan: &BuildPlan, options: &PrepareBuildOptions) -> Result<PreparedBuild> {
+pub fn prepare_build(
+    plan: &BuildPlan,
+    options: &PrepareBuildOptions,
+    progress: &mut dyn BuildProgress,
+) -> Result<PreparedBuild> {
     let paths = BuildPaths::create(plan, options)?;
     fs::create_dir_all(&paths.logs_dir).into_diagnostic()?;
 
@@ -35,6 +145,14 @@ pub fn prepare_build(plan: &BuildPlan, options: &PrepareBuildOptions) -> Result<
     let inner_env_path = plan.inner_env_path_for(&paths.conda_prefix);
     let conda_python = conda_python_path(&paths.conda_prefix);
     let launcher_relpath = PathBuf::from("bin").join(format!("pybin-{}", plan.entrypoint_name));
+
+    progress.on_layout_ready(
+        plan,
+        &paths.work_dir,
+        &paths.logs_dir,
+        &paths.conda_prefix,
+        &inner_env_path,
+    );
 
     info!(
         project = %plan.project_root.display(),
@@ -44,22 +162,24 @@ pub fn prepare_build(plan: &BuildPlan, options: &PrepareBuildOptions) -> Result<
         "preparing staged build",
     );
 
-    run_logged(
-        "conda-create",
-        &paths.logs_dir,
-        &plan.project_root,
-        "conda",
-        &[
-            OsString::from("create"),
-            OsString::from("-y"),
-            OsString::from("-p"),
-            paths.conda_prefix.as_os_str().to_os_string(),
-            OsString::from(python_spec),
-            OsString::from("uv"),
-            OsString::from("conda-pack"),
-        ],
-        &[],
-    )?;
+    run_phase(progress, BuildPhase::CreateCondaPrefix, || {
+        run_logged(
+            "conda-create",
+            &paths.logs_dir,
+            &plan.project_root,
+            "conda",
+            &[
+                OsString::from("create"),
+                OsString::from("-y"),
+                OsString::from("-p"),
+                paths.conda_prefix.as_os_str().to_os_string(),
+                OsString::from(python_spec),
+                OsString::from("uv"),
+                OsString::from("conda-pack"),
+            ],
+            &[],
+        )
+    })?;
 
     let mut uv_sync_args = vec![
         OsString::from("run"),
@@ -77,42 +197,50 @@ pub fn prepare_build(plan: &BuildPlan, options: &PrepareBuildOptions) -> Result<
         uv_sync_args.push(OsString::from("--frozen"));
     }
 
-    run_logged(
-        "uv-sync",
-        &paths.logs_dir,
-        &plan.project_root,
-        "conda",
-        &uv_sync_args,
-        &[
-            (
-                "UV_PROJECT_ENVIRONMENT",
-                inner_env_path.as_os_str().to_os_string(),
-            ),
-            ("UV_LINK_MODE", OsString::from("copy")),
-        ],
-    )?;
+    run_phase(progress, BuildPhase::SyncUvProject, || {
+        run_logged(
+            "uv-sync",
+            &paths.logs_dir,
+            &plan.project_root,
+            "conda",
+            &uv_sync_args,
+            &[
+                (
+                    "UV_PROJECT_ENVIRONMENT",
+                    inner_env_path.as_os_str().to_os_string(),
+                ),
+                ("UV_LINK_MODE", OsString::from("copy")),
+            ],
+        )
+    })?;
 
-    run_logged(
-        "conda-pack",
-        &paths.logs_dir,
-        &plan.project_root,
-        "conda",
-        &[
-            OsString::from("run"),
-            OsString::from("-p"),
-            paths.conda_prefix.as_os_str().to_os_string(),
-            OsString::from("conda-pack"),
-            OsString::from("-p"),
-            paths.conda_prefix.as_os_str().to_os_string(),
-            OsString::from("-o"),
-            paths.packed_env_path.as_os_str().to_os_string(),
-            OsString::from("--force"),
-        ],
-        &[],
-    )?;
+    run_phase(progress, BuildPhase::PackCondaPrefix, || {
+        run_logged(
+            "conda-pack",
+            &paths.logs_dir,
+            &plan.project_root,
+            "conda",
+            &[
+                OsString::from("run"),
+                OsString::from("-p"),
+                paths.conda_prefix.as_os_str().to_os_string(),
+                OsString::from("conda-pack"),
+                OsString::from("-p"),
+                paths.conda_prefix.as_os_str().to_os_string(),
+                OsString::from("-o"),
+                paths.packed_env_path.as_os_str().to_os_string(),
+                OsString::from("--force"),
+            ],
+            &[],
+        )
+    })?;
 
-    unpack_tarball(&paths.packed_env_path, &paths.stage_dir)?;
-    write_launcher(plan, &paths.stage_dir, &launcher_relpath)?;
+    run_phase(progress, BuildPhase::UnpackPackedPrefix, || {
+        unpack_tarball(&paths.packed_env_path, &paths.stage_dir)
+    })?;
+    run_phase(progress, BuildPhase::WriteLauncher, || {
+        write_launcher(plan, &paths.stage_dir, &launcher_relpath)
+    })?;
 
     Ok(PreparedBuild {
         work_dir: paths.work_dir,
@@ -123,6 +251,25 @@ pub fn prepare_build(plan: &BuildPlan, options: &PrepareBuildOptions) -> Result<
         stage_dir: paths.stage_dir,
         launcher_relpath,
     })
+}
+
+pub fn run_phase<T>(
+    progress: &mut dyn BuildProgress,
+    phase: BuildPhase,
+    action: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    progress.on_phase_start(phase);
+    let started = Instant::now();
+    match action() {
+        Ok(value) => {
+            progress.on_phase_complete(phase, started.elapsed());
+            Ok(value)
+        }
+        Err(error) => {
+            progress.on_phase_failed(phase, started.elapsed(), &error);
+            Err(error)
+        }
+    }
 }
 
 #[derive(Debug)]
