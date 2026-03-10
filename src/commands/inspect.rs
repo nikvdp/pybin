@@ -59,6 +59,11 @@ pub fn run(args: InspectArgs) -> Result<()> {
             );
             println!(
                 "  {} {}",
+                label("Install mode:"),
+                value(&plan.install_strategy.description())
+            );
+            println!(
+                "  {} {}",
                 label("uv.lock present:"),
                 value(yes_no(plan.uv_lock_present))
             );

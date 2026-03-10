@@ -1,4 +1,4 @@
-use crate::plan::BuildPlan;
+use crate::plan::{BuildPlan, InstallStrategy};
 use flate2::read::GzDecoder;
 use miette::{IntoDiagnostic, Result, WrapErr, miette};
 use std::{
@@ -50,7 +50,7 @@ impl BuildPhase {
     pub fn title(self) -> &'static str {
         match self {
             BuildPhase::CreateCondaPrefix => "Create conda build prefix",
-            BuildPhase::SyncUvProject => "Sync uv project into build environment",
+            BuildPhase::SyncUvProject => "Install project into build environment",
             BuildPhase::PackCondaPrefix => "Pack relocatable conda prefix",
             BuildPhase::UnpackPackedPrefix => "Unpack staged runtime tree",
             BuildPhase::PruneStagedRuntime => "Prune non-runtime files from staged tree",
@@ -78,7 +78,7 @@ impl BuildPhase {
     pub fn success_message(self) -> &'static str {
         match self {
             BuildPhase::CreateCondaPrefix => "Created conda build prefix",
-            BuildPhase::SyncUvProject => "Synced uv project into packaged runtime",
+            BuildPhase::SyncUvProject => "Installed project into packaged runtime",
             BuildPhase::PackCondaPrefix => "Packed relocatable conda prefix",
             BuildPhase::UnpackPackedPrefix => "Unpacked staged runtime tree",
             BuildPhase::PruneStagedRuntime => "Pruned non-runtime files from staged tree",
@@ -170,36 +170,13 @@ pub fn prepare_build(
         )
     })?;
 
-    let mut uv_sync_args = vec![
-        OsString::from("run"),
-        OsString::from("-p"),
-        paths.conda_prefix.as_os_str().to_os_string(),
-        OsString::from("uv"),
-        OsString::from("sync"),
-        OsString::from("--no-editable"),
-        OsString::from("--link-mode"),
-        OsString::from("copy"),
-        OsString::from("--python"),
-        conda_python.as_os_str().to_os_string(),
-    ];
-    if plan.uv_lock_present {
-        uv_sync_args.push(OsString::from("--frozen"));
-    }
-
     run_phase(progress, BuildPhase::SyncUvProject, || {
-        run_logged(
-            "uv-sync",
+        install_project(
+            plan,
             &paths.logs_dir,
-            &plan.project_root,
-            "conda",
-            &uv_sync_args,
-            &[
-                (
-                    "UV_PROJECT_ENVIRONMENT",
-                    inner_env_path.as_os_str().to_os_string(),
-                ),
-                ("UV_LINK_MODE", OsString::from("copy")),
-            ],
+            &paths.conda_prefix,
+            &conda_python,
+            &inner_env_path,
         )
     })?;
 
@@ -309,6 +286,8 @@ fn conda_python_spec(plan: &BuildPlan) -> String {
     let value = request.value.trim();
     if value.starts_with("python") {
         value.to_string()
+    } else if let Some(spec) = normalize_poetry_python_request(value) {
+        format!("python{spec}")
     } else if value
         .chars()
         .next()
@@ -318,6 +297,73 @@ fn conda_python_spec(plan: &BuildPlan) -> String {
     } else {
         format!("python={value}")
     }
+}
+
+fn normalize_poetry_python_request(value: &str) -> Option<String> {
+    if let Some(version) = value.strip_prefix('^') {
+        return expand_caret_requirement(version.trim());
+    }
+
+    if let Some(version) = value.strip_prefix('~') {
+        return expand_tilde_requirement(version.trim());
+    }
+
+    None
+}
+
+fn expand_caret_requirement(version: &str) -> Option<String> {
+    let segments = parse_version_segments(version)?;
+    let upper = if segments.first().copied().unwrap_or(0) > 0 {
+        vec![segments[0] + 1]
+    } else if segments.get(1).copied().unwrap_or(0) > 0 {
+        vec![0, segments[1] + 1]
+    } else {
+        vec![0, 0, segments.get(2).copied().unwrap_or(0) + 1]
+    };
+
+    Some(format!(
+        ">={},<{}",
+        format_version_segments(&segments),
+        format_version_segments(&upper)
+    ))
+}
+
+fn expand_tilde_requirement(version: &str) -> Option<String> {
+    let segments = parse_version_segments(version)?;
+    let upper = if segments.len() >= 2 {
+        vec![segments[0], segments[1] + 1]
+    } else {
+        vec![segments[0] + 1]
+    };
+
+    Some(format!(
+        ">={},<{}",
+        format_version_segments(&segments),
+        format_version_segments(&upper)
+    ))
+}
+
+fn parse_version_segments(version: &str) -> Option<Vec<u64>> {
+    let mut segments = Vec::new();
+    for segment in version.split('.') {
+        if segment.is_empty() {
+            return None;
+        }
+        segments.push(segment.parse().ok()?);
+    }
+    if segments.is_empty() {
+        None
+    } else {
+        Some(segments)
+    }
+}
+
+fn format_version_segments(segments: &[u64]) -> String {
+    segments
+        .iter()
+        .map(|segment| segment.to_string())
+        .collect::<Vec<_>>()
+        .join(".")
 }
 
 fn conda_python_path(conda_prefix: &Path) -> PathBuf {
@@ -553,6 +599,182 @@ fn parse_entrypoint_target(target: &str) -> Result<(&str, &str)> {
     }
 
     Ok((module, attr))
+}
+
+fn install_project(
+    plan: &BuildPlan,
+    logs_dir: &Path,
+    conda_prefix: &Path,
+    conda_python: &Path,
+    inner_env_path: &Path,
+) -> Result<()> {
+    match &plan.install_strategy {
+        InstallStrategy::UvSync { frozen } => install_with_uv_sync(
+            plan,
+            logs_dir,
+            conda_prefix,
+            conda_python,
+            inner_env_path,
+            *frozen,
+        ),
+        InstallStrategy::UvPipInstallProject => {
+            install_with_uv_pip_project(plan, logs_dir, conda_prefix, conda_python, inner_env_path)
+        }
+        InstallStrategy::UvPipInstallRequirements { relative_path } => {
+            install_with_uv_pip_requirements(
+                plan,
+                logs_dir,
+                conda_prefix,
+                conda_python,
+                inner_env_path,
+                relative_path,
+            )
+        }
+    }
+}
+
+fn install_with_uv_sync(
+    plan: &BuildPlan,
+    logs_dir: &Path,
+    conda_prefix: &Path,
+    conda_python: &Path,
+    inner_env_path: &Path,
+    frozen: bool,
+) -> Result<()> {
+    let mut uv_sync_args = vec![
+        OsString::from("run"),
+        OsString::from("-p"),
+        conda_prefix.as_os_str().to_os_string(),
+        OsString::from("uv"),
+        OsString::from("sync"),
+        OsString::from("--no-editable"),
+        OsString::from("--link-mode"),
+        OsString::from("copy"),
+        OsString::from("--python"),
+        conda_python.as_os_str().to_os_string(),
+    ];
+    if frozen {
+        uv_sync_args.push(OsString::from("--frozen"));
+    }
+
+    run_logged(
+        "uv-sync",
+        logs_dir,
+        &plan.project_root,
+        "conda",
+        &uv_sync_args,
+        &[
+            (
+                "UV_PROJECT_ENVIRONMENT",
+                inner_env_path.as_os_str().to_os_string(),
+            ),
+            ("UV_LINK_MODE", OsString::from("copy")),
+        ],
+    )
+}
+
+fn install_with_uv_pip_project(
+    plan: &BuildPlan,
+    logs_dir: &Path,
+    conda_prefix: &Path,
+    conda_python: &Path,
+    inner_env_path: &Path,
+) -> Result<()> {
+    create_inner_uv_env(
+        logs_dir,
+        &plan.project_root,
+        conda_prefix,
+        conda_python,
+        inner_env_path,
+    )?;
+    let inner_python = conda_python_path(inner_env_path);
+
+    run_logged(
+        "uv-pip-install-project",
+        logs_dir,
+        &plan.project_root,
+        "conda",
+        &[
+            OsString::from("run"),
+            OsString::from("-p"),
+            conda_prefix.as_os_str().to_os_string(),
+            OsString::from("uv"),
+            OsString::from("pip"),
+            OsString::from("install"),
+            OsString::from("--python"),
+            inner_python.as_os_str().to_os_string(),
+            OsString::from("--link-mode"),
+            OsString::from("copy"),
+            OsString::from("."),
+        ],
+        &[("UV_LINK_MODE", OsString::from("copy"))],
+    )
+}
+
+fn install_with_uv_pip_requirements(
+    plan: &BuildPlan,
+    logs_dir: &Path,
+    conda_prefix: &Path,
+    conda_python: &Path,
+    inner_env_path: &Path,
+    relative_path: &Path,
+) -> Result<()> {
+    create_inner_uv_env(
+        logs_dir,
+        &plan.project_root,
+        conda_prefix,
+        conda_python,
+        inner_env_path,
+    )?;
+    let inner_python = conda_python_path(inner_env_path);
+
+    run_logged(
+        "uv-pip-install-requirements",
+        logs_dir,
+        &plan.project_root,
+        "conda",
+        &[
+            OsString::from("run"),
+            OsString::from("-p"),
+            conda_prefix.as_os_str().to_os_string(),
+            OsString::from("uv"),
+            OsString::from("pip"),
+            OsString::from("install"),
+            OsString::from("--python"),
+            inner_python.as_os_str().to_os_string(),
+            OsString::from("--link-mode"),
+            OsString::from("copy"),
+            OsString::from("-r"),
+            relative_path.as_os_str().to_os_string(),
+        ],
+        &[("UV_LINK_MODE", OsString::from("copy"))],
+    )
+}
+
+fn create_inner_uv_env(
+    logs_dir: &Path,
+    current_dir: &Path,
+    conda_prefix: &Path,
+    conda_python: &Path,
+    inner_env_path: &Path,
+) -> Result<()> {
+    run_logged(
+        "uv-venv",
+        logs_dir,
+        current_dir,
+        "conda",
+        &[
+            OsString::from("run"),
+            OsString::from("-p"),
+            conda_prefix.as_os_str().to_os_string(),
+            OsString::from("uv"),
+            OsString::from("venv"),
+            OsString::from("--python"),
+            conda_python.as_os_str().to_os_string(),
+            inner_env_path.as_os_str().to_os_string(),
+        ],
+        &[],
+    )
 }
 
 fn run_logged(

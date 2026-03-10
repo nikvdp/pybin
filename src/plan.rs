@@ -10,22 +10,45 @@ pub struct BuildPlan {
     pub package_name: String,
     pub python_request: Option<PythonRequest>,
     pub metadata_source: ProjectMetadataSource,
+    pub install_strategy: InstallStrategy,
     pub entrypoint_name: String,
     pub entrypoint_target: String,
     pub uv_lock_present: bool,
     pub inner_env_relative_path: PathBuf,
 }
 
+#[derive(Debug, Clone)]
+pub enum InstallStrategy {
+    UvSync { frozen: bool },
+    UvPipInstallProject,
+    UvPipInstallRequirements { relative_path: PathBuf },
+}
+
+impl InstallStrategy {
+    pub fn description(&self) -> String {
+        match self {
+            Self::UvSync { frozen: true } => "uv sync --frozen".to_string(),
+            Self::UvSync { frozen: false } => "uv sync".to_string(),
+            Self::UvPipInstallProject => "uv pip install .".to_string(),
+            Self::UvPipInstallRequirements { relative_path } => {
+                format!("uv pip install -r {}", relative_path.display())
+            }
+        }
+    }
+}
+
 impl BuildPlan {
     pub fn resolve(metadata: ProjectMetadata, entrypoint_override: Option<&str>) -> Result<Self> {
         let (entrypoint_name, entrypoint_target) =
             select_entrypoint(&metadata, entrypoint_override)?;
+        let install_strategy = select_install_strategy(&metadata);
 
         Ok(Self {
             project_root: metadata.project_root,
             package_name: metadata.package_name,
             python_request: metadata.python_request,
             metadata_source: metadata.metadata_source,
+            install_strategy,
             entrypoint_name,
             entrypoint_target,
             uv_lock_present: metadata.uv_lock_present,
@@ -36,6 +59,27 @@ impl BuildPlan {
     pub fn inner_env_path_for<P: AsRef<Path>>(&self, conda_prefix: P) -> PathBuf {
         conda_prefix.as_ref().join(&self.inner_env_relative_path)
     }
+}
+
+fn select_install_strategy(metadata: &ProjectMetadata) -> InstallStrategy {
+    if metadata.uv_lock_present {
+        return InstallStrategy::UvSync { frozen: true };
+    }
+
+    if metadata.project_root.join("pyproject.toml").is_file()
+        || metadata.project_root.join("setup.py").is_file()
+        || metadata.project_root.join("setup.cfg").is_file()
+    {
+        return InstallStrategy::UvPipInstallProject;
+    }
+
+    if metadata.project_root.join("requirements.txt").is_file() {
+        return InstallStrategy::UvPipInstallRequirements {
+            relative_path: PathBuf::from("requirements.txt"),
+        };
+    }
+
+    InstallStrategy::UvPipInstallProject
 }
 
 fn select_entrypoint(

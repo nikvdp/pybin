@@ -81,33 +81,49 @@ pub fn load_project_metadata(
 ) -> Result<ProjectMetadata> {
     let project_root = project_root.as_ref();
     let manifest_path = project_root.join("pyproject.toml");
-    let manifest_contents = fs::read_to_string(&manifest_path).into_diagnostic()?;
-    let manifest: PyProjectToml = toml::from_str(&manifest_contents).into_diagnostic()?;
+    let manifest = if manifest_path.is_file() {
+        Some(
+            toml::from_str::<PyProjectToml>(&fs::read_to_string(&manifest_path).into_diagnostic()?)
+                .into_diagnostic()?,
+        )
+    } else {
+        None
+    };
     let uv_lock_present = project_root.join("uv.lock").is_file();
 
-    if let Some(project) = manifest.project {
+    if let Some(project) = manifest
+        .as_ref()
+        .and_then(|manifest| manifest.project.as_ref())
+    {
         return Ok(ProjectMetadata {
             project_root: project_root.to_path_buf(),
-            package_name: project.name,
-            project_scripts: project.scripts,
+            package_name: project.name.clone(),
+            project_scripts: project.scripts.clone(),
             python_request: resolve_python_request(
                 project_root,
                 python_override,
-                project.requires_python.map(|value| ManifestPythonRequest {
-                    value,
-                    source: PythonRequestSource::RequiresPython,
-                }),
+                project
+                    .requires_python
+                    .clone()
+                    .map(|value| ManifestPythonRequest {
+                        value,
+                        source: PythonRequestSource::RequiresPython,
+                    }),
             )?,
             uv_lock_present,
             metadata_source: ProjectMetadataSource::Pep621Project,
         });
     }
 
-    if let Some(poetry) = manifest.tool.and_then(|tool| tool.poetry) {
+    if let Some(poetry) = manifest
+        .as_ref()
+        .and_then(|manifest| manifest.tool.as_ref())
+        .and_then(|tool| tool.poetry.as_ref())
+    {
         return Ok(ProjectMetadata {
             project_root: project_root.to_path_buf(),
-            package_name: poetry.name,
-            project_scripts: poetry.scripts,
+            package_name: poetry.name.clone(),
+            project_scripts: poetry.scripts.clone(),
             python_request: resolve_python_request(
                 project_root,
                 python_override,
@@ -134,7 +150,7 @@ pub fn load_project_metadata(
     }
 
     Err(miette!(
-        "`{}` is missing supported project metadata; expected `[project]`, `[tool.poetry]`, or a parseable `setup.py`",
+        "project root `{}` is missing supported project metadata; expected `[project]`, `[tool.poetry]`, or a parseable `setup.py`",
         manifest_path.display()
     ))
 }

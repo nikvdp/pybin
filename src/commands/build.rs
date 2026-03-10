@@ -182,6 +182,11 @@ impl BuildUi {
             label("Payload compression:"),
             value(payload_compression.as_str())
         ));
+        self.println(&format!(
+            "  {} {}",
+            label("Install mode:"),
+            value(&plan.install_strategy.description())
+        ));
     }
 
     fn finish(&mut self) {
