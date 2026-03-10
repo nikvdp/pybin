@@ -214,7 +214,7 @@ scripts = { demo = "demo.cli:main" }
         fs::write(dir.path().join(".python-version"), "3.12.7\n").expect("write .python-version");
 
         let metadata = load_project_metadata(dir.path(), None).expect("metadata");
-        let plan = BuildPlan::resolve(metadata, None).expect("plan");
+        let plan = BuildPlan::resolve(metadata, None, None).expect("plan");
 
         assert_eq!(plan.package_name, "demo-app");
         assert_eq!(plan.entrypoint_name, "demo");
@@ -246,7 +246,7 @@ scripts = { demo = "demo.cli:main", admin = "demo.admin:main" }
         .expect("write pyproject");
 
         let metadata = load_project_metadata(dir.path(), None).expect("metadata");
-        let error = BuildPlan::resolve(metadata, None).expect_err("should fail");
+        let error = BuildPlan::resolve(metadata, None, None).expect_err("should fail");
 
         assert!(error.to_string().contains("--entrypoint"));
     }
@@ -267,7 +267,7 @@ requires-python = ">=3.12,<3.13"
         .expect("write pyproject");
 
         let metadata = load_project_metadata(dir.path(), None).expect("metadata");
-        let plan = BuildPlan::resolve(metadata, Some("admin")).expect("plan");
+        let plan = BuildPlan::resolve(metadata, Some("admin"), None).expect("plan");
 
         assert_eq!(plan.entrypoint_name, "admin");
         assert_eq!(plan.entrypoint_target, "demo.admin:main");
@@ -295,7 +295,7 @@ scripts = { demo = "demo.cli:main" }
         fs::write(dir.path().join("uv.lock"), "version = 1\n").expect("write uv.lock");
 
         let metadata = load_project_metadata(dir.path(), None).expect("metadata");
-        let plan = BuildPlan::resolve(metadata, None).expect("plan");
+        let plan = BuildPlan::resolve(metadata, None, None).expect("plan");
 
         assert!(matches!(
             plan.install_strategy,
@@ -323,7 +323,7 @@ legacy-poetry-app = "legacy.cli:main"
         .expect("write pyproject");
 
         let metadata = load_project_metadata(dir.path(), None).expect("metadata");
-        let plan = BuildPlan::resolve(metadata, None).expect("plan");
+        let plan = BuildPlan::resolve(metadata, None, None).expect("plan");
 
         assert!(matches!(
             plan.install_strategy,
@@ -345,7 +345,8 @@ legacy-poetry-app = "legacy.cli:main"
         .expect("write cli");
 
         let metadata = load_project_metadata(dir.path(), Some("3.12")).expect("metadata");
-        let plan = BuildPlan::resolve(metadata, Some("req-app=req_app.cli:main")).expect("plan");
+        let plan =
+            BuildPlan::resolve(metadata, Some("req-app=req_app.cli:main"), None).expect("plan");
 
         assert_eq!(plan.entrypoint_name, "req-app");
         assert_eq!(plan.entrypoint_target, "req_app.cli:main");

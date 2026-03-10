@@ -1,4 +1,7 @@
-use pybin::project::{ProjectMetadataSource, PythonRequestSource, load_project_metadata};
+use pybin::{
+    plan::{BuildPlan, InstallStrategy},
+    project::{ProjectMetadataSource, PythonRequestSource, load_project_metadata},
+};
 use std::fs;
 use tempfile::tempdir;
 
@@ -139,4 +142,32 @@ fn falls_back_to_requirements_txt_when_no_packaging_metadata_exists() {
     let request = metadata.python_request.expect("python request");
     assert_eq!(request.value, "3.12");
     assert!(matches!(request.source, PythonRequestSource::Override));
+}
+
+#[test]
+fn selects_custom_install_command_when_requested() {
+    let dir = tempdir().expect("tempdir");
+    fs::write(
+        dir.path().join("pyproject.toml"),
+        r#"
+[project]
+name = "demo-app"
+version = "0.1.0"
+scripts = { demo = "demo.cli:main" }
+"#,
+    )
+    .expect("write pyproject");
+
+    let metadata = load_project_metadata(dir.path(), None).expect("metadata");
+    let plan = BuildPlan::resolve(metadata, None, Some("uv pip install -r requirements.txt"))
+        .expect("plan");
+
+    assert!(matches!(
+        plan.install_strategy,
+        InstallStrategy::CustomCommand { .. }
+    ));
+    assert_eq!(
+        plan.install_strategy.description(),
+        "custom install command: uv pip install -r requirements.txt"
+    );
 }

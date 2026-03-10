@@ -19,7 +19,7 @@ fn builds_and_runs_the_demo_fixture_as_a_single_binary() {
     let cache_dir = temp.path().join("cache with spaces");
 
     let metadata = load_project_metadata(&fixture, None).expect("fixture metadata");
-    let plan = BuildPlan::resolve(metadata, None).expect("fixture plan");
+    let plan = BuildPlan::resolve(metadata, None, None).expect("fixture plan");
     let mut progress = SilentBuildProgress;
     let prepared = prepare_build(
         &plan,
