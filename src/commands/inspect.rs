@@ -27,6 +27,7 @@ pub fn run(args: InspectArgs) -> Result<()> {
         "inner uv env: <conda-prefix>/{}",
         plan.inner_env_relative_path.display()
     );
+    println!("release shape: single pybin binary used as the SFX stub");
 
     Ok(())
 }

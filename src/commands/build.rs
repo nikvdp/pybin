@@ -1,6 +1,7 @@
 use crate::{
     build::{PrepareBuildOptions, prepare_build},
     cli::BuildArgs,
+    commands::doctor::require_host_prerequisites,
     packer::{PackOptions, pack_directory},
     plan::BuildPlan,
     project::load_project_metadata,
@@ -12,6 +13,8 @@ use std::{
 };
 
 pub fn run(args: BuildArgs) -> Result<()> {
+    require_host_prerequisites(&args.project)?;
+
     let metadata = load_project_metadata(&args.project, args.python.as_deref())?;
     let plan = BuildPlan::resolve(metadata, args.entrypoint.as_deref())?;
     let prepared = prepare_build(
@@ -37,6 +40,7 @@ pub fn run(args: BuildArgs) -> Result<()> {
 
     println!("Built `{}`", plan.package_name);
     println!("Output: {}", output_path.display());
+    println!("Run: {}", output_path.display());
     println!("Build id: {}", manifest.build_uid);
     println!("Work dir: {}", prepared.work_dir.display());
     println!("Logs dir: {}", prepared.logs_dir.display());
@@ -45,6 +49,7 @@ pub fn run(args: BuildArgs) -> Result<()> {
     println!("Packed env: {}", prepared.packed_env_path.display());
     println!("Stage dir: {}", prepared.stage_dir.display());
     println!("Launcher: {}", prepared.launcher_relpath.display());
+    println!("Note: pybin used its own executable as the SFX stub for this build.");
 
     Ok(())
 }

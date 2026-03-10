@@ -7,11 +7,11 @@ use std::path::PathBuf;
     version,
     about = "Package uv-managed Python apps into self-extracting binaries",
     long_about = "pybin builds a self-extracting executable for a uv-managed Python \
-project by using an outer conda prefix as the relocatable host and an inner uv-managed \
-environment as the application runtime.",
-    after_help = "This repository is still in bootstrap mode. The command surface is \
-stable enough to wire up the remaining build pipeline, but most actions are not \
-implemented yet."
+project by combining a relocatable outer conda prefix with an inner uv-managed \
+runtime environment.",
+    after_help = "Only host `conda` is required. pybin installs `uv` and \
+`conda-pack` inside the temporary build prefix, then packs the result into one \
+self-extracting executable."
 )]
 pub struct Cli {
     #[arg(
@@ -39,9 +39,9 @@ pub struct Cli {
 pub enum Command {
     /// Build a self-extracting binary from a uv project
     Build(BuildArgs),
-    /// Inspect a project and show the planned build inputs
+    /// Inspect the project metadata and resolved build plan
     Inspect(InspectArgs),
-    /// Check whether required tools are present before a build
+    /// Check project readiness and host prerequisites before a build
     Doctor(DoctorArgs),
 }
 
@@ -64,14 +64,14 @@ pub struct BuildArgs {
     #[arg(
         long,
         value_name = "NAME",
-        help = "Explicit entrypoint or script name to package."
+        help = "Script name from `[project.scripts]` to package."
     )]
     pub entrypoint: Option<String>,
 
     #[arg(
         long,
         value_name = "VERSION",
-        help = "Override the Python version request before handing it to conda."
+        help = "Override the Python request before handing it to conda."
     )]
     pub python: Option<String>,
 
@@ -95,14 +95,14 @@ pub struct InspectArgs {
     #[arg(
         long,
         value_name = "NAME",
-        help = "Explicit entrypoint or script name to inspect."
+        help = "Script name from `[project.scripts]` to inspect."
     )]
     pub entrypoint: Option<String>,
 
     #[arg(
         long,
         value_name = "VERSION",
-        help = "Override the Python version request before inspection."
+        help = "Override the Python request before inspection."
     )]
     pub python: Option<String>,
 }

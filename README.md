@@ -10,12 +10,15 @@ It builds a one-file executable by combining:
 3. `conda-pack` for freezing the full prefix
 4. an in-repo Warp-style runner and packer for the final SFX binary
 
+The shipped `pybin` executable is self-contained: it is both the CLI you run and
+the SFX stub used to build output binaries.
+
 ## Requirements
 
-- `conda`
-- `uv`
-- the repo binaries built locally, or `pybin` plus the sibling `pybin-runner`
-  installed together
+- host `conda`
+
+You do not need host `uv` or host `conda-pack`. `pybin` installs both inside the
+temporary conda build prefix it creates for each build.
 
 ## Build Topology
 
@@ -48,13 +51,13 @@ That topology was rejected because:
 Build a project into a one-file executable:
 
 ```bash
-cargo run --bin pybin -- build /path/to/project
+pybin build /path/to/project
 ```
 
 Choose an output path and keep build artifacts for inspection:
 
 ```bash
-cargo run --bin pybin -- build \
+pybin build \
   ./fixtures/demo-app \
   --work-dir /tmp/pybin-demo-work \
   --output /tmp/demo-sfx
@@ -70,6 +73,18 @@ Override the extraction cache root:
 
 ```bash
 WARP_CACHE_DIR=/tmp/pybin-cache /tmp/demo-sfx hello
+```
+
+Inspect the resolved build plan before packaging:
+
+```bash
+pybin inspect /path/to/project
+```
+
+Check project readiness and host prerequisites:
+
+```bash
+pybin doctor /path/to/project
 ```
 
 ## Fixture Validation
@@ -97,6 +112,7 @@ the extraction cache, and runs it again.
   auto-created `target/pybin/<timestamp>-<slug>/logs` directory.
 - The packaged binary is same-platform only. `conda-pack` does not make a macOS
   build portable to Linux or vice versa.
+- Host `conda` is required. `pybin doctor` is the quickest preflight check.
 - Packaging expects `[project.scripts]` to define the entrypoint. If the project
   has multiple scripts, pass `--entrypoint <name>`.
 - The inner environment is always built with `uv sync --no-editable`.
