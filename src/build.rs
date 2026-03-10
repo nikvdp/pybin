@@ -23,26 +23,29 @@ pub enum BuildPhase {
     PackCondaPrefix,
     UnpackPackedPrefix,
     PruneStagedRuntime,
+    StageProjectSource,
     WriteLauncher,
     AssembleExecutable,
 }
 
 impl BuildPhase {
-    pub const PREPARE_PHASES: [BuildPhase; 6] = [
+    pub const PREPARE_PHASES: [BuildPhase; 7] = [
         BuildPhase::CreateCondaPrefix,
         BuildPhase::SyncUvProject,
         BuildPhase::PackCondaPrefix,
         BuildPhase::UnpackPackedPrefix,
         BuildPhase::PruneStagedRuntime,
+        BuildPhase::StageProjectSource,
         BuildPhase::WriteLauncher,
     ];
 
-    pub const ALL_PHASES: [BuildPhase; 7] = [
+    pub const ALL_PHASES: [BuildPhase; 8] = [
         BuildPhase::CreateCondaPrefix,
         BuildPhase::SyncUvProject,
         BuildPhase::PackCondaPrefix,
         BuildPhase::UnpackPackedPrefix,
         BuildPhase::PruneStagedRuntime,
+        BuildPhase::StageProjectSource,
         BuildPhase::WriteLauncher,
         BuildPhase::AssembleExecutable,
     ];
@@ -54,6 +57,7 @@ impl BuildPhase {
             BuildPhase::PackCondaPrefix => "Pack relocatable conda prefix",
             BuildPhase::UnpackPackedPrefix => "Unpack staged runtime tree",
             BuildPhase::PruneStagedRuntime => "Prune non-runtime files from staged tree",
+            BuildPhase::StageProjectSource => "Stage local project source overlay",
             BuildPhase::WriteLauncher => "Write packaged launcher shim",
             BuildPhase::AssembleExecutable => "Assemble self-extracting executable",
         }
@@ -70,6 +74,9 @@ impl BuildPhase {
             BuildPhase::PackCondaPrefix => "Packing the relocatable conda prefix",
             BuildPhase::UnpackPackedPrefix => "Unpacking the packed prefix into the staging area",
             BuildPhase::PruneStagedRuntime => "Pruning non-runtime files from the staged tree",
+            BuildPhase::StageProjectSource => {
+                "Staging local project source into the packaged runtime"
+            }
             BuildPhase::WriteLauncher => "Writing the packaged entry shim",
             BuildPhase::AssembleExecutable => "Assembling the final self-extracting binary",
         }
@@ -82,6 +89,7 @@ impl BuildPhase {
             BuildPhase::PackCondaPrefix => "Packed relocatable conda prefix",
             BuildPhase::UnpackPackedPrefix => "Unpacked staged runtime tree",
             BuildPhase::PruneStagedRuntime => "Pruned non-runtime files from staged tree",
+            BuildPhase::StageProjectSource => "Staged local project source overlay",
             BuildPhase::WriteLauncher => "Wrote packaged entry shim",
             BuildPhase::AssembleExecutable => "Assembled self-extracting executable",
         }
@@ -206,6 +214,9 @@ pub fn prepare_build(
     })?;
     run_phase(progress, BuildPhase::PruneStagedRuntime, || {
         prune_staged_runtime(&paths.stage_dir, &paths.logs_dir)
+    })?;
+    run_phase(progress, BuildPhase::StageProjectSource, || {
+        stage_source_overlay(plan, &paths.stage_dir)
     })?;
     run_phase(progress, BuildPhase::WriteLauncher, || {
         write_launcher(plan, &paths.stage_dir, &launcher_relpath)
@@ -405,6 +416,9 @@ set -euo pipefail\n\
 SCRIPT_DIR=\"$(cd \"$(dirname \"$0\")\" && pwd)\"\n\
 ROOT_DIR=\"$(cd \"$SCRIPT_DIR/..\" && pwd)\"\n\
 export PATH=\"$ROOT_DIR/{inner_env}/bin:$ROOT_DIR/bin:$PATH\"\n\
+if [ -d \"$ROOT_DIR/pybin-src\" ]; then\n\
+  export PYTHONPATH=\"$ROOT_DIR/pybin-src${{PYTHONPATH:+:$PYTHONPATH}}\"\n\
+fi\n\
 PYBIN_ENTRYPOINT='import importlib\n\
 import sys\n\
 from functools import reduce\n\
@@ -428,6 +442,59 @@ exec \"$ROOT_DIR/{inner_env}/bin/python\" -c \"$PYBIN_ENTRYPOINT\" \"{entrypoint
         fs::set_permissions(&launcher_path, permissions).into_diagnostic()?;
     }
 
+    Ok(())
+}
+
+fn stage_source_overlay(plan: &BuildPlan, stage_dir: &Path) -> Result<()> {
+    let Some(source_overlay) = &plan.source_overlay else {
+        return Ok(());
+    };
+
+    let source_path = plan.project_root.join(&source_overlay.relative_source_path);
+    let destination = stage_dir
+        .join("pybin-src")
+        .join(&source_overlay.module_root);
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).into_diagnostic()?;
+    }
+
+    if source_path.is_dir() {
+        copy_dir_all(&source_path, &destination)
+    } else {
+        let file_destination = if source_path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext == "py")
+        {
+            stage_dir.join("pybin-src").join(
+                source_path
+                    .file_name()
+                    .ok_or_else(|| miette!("source overlay path had no filename"))?,
+            )
+        } else {
+            destination
+        };
+        if let Some(parent) = file_destination.parent() {
+            fs::create_dir_all(parent).into_diagnostic()?;
+        }
+        fs::copy(&source_path, &file_destination).into_diagnostic()?;
+        Ok(())
+    }
+}
+
+fn copy_dir_all(source: &Path, destination: &Path) -> Result<()> {
+    fs::create_dir_all(destination).into_diagnostic()?;
+    for entry in fs::read_dir(source).into_diagnostic()? {
+        let entry = entry.into_diagnostic()?;
+        let entry_type = entry.file_type().into_diagnostic()?;
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        if entry_type.is_dir() {
+            copy_dir_all(&source_path, &destination_path)?;
+        } else {
+            fs::copy(&source_path, &destination_path).into_diagnostic()?;
+        }
+    }
     Ok(())
 }
 

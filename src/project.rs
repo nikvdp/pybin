@@ -14,6 +14,14 @@ pub struct ProjectMetadata {
     pub metadata_source: ProjectMetadataSource,
 }
 
+pub fn supported_project_markers(project_root: &Path) -> Vec<PathBuf> {
+    ["pyproject.toml", "setup.py", "requirements.txt"]
+        .into_iter()
+        .map(|name| project_root.join(name))
+        .filter(|path| path.is_file())
+        .collect()
+}
+
 #[derive(Debug, Clone)]
 pub struct PythonRequest {
     pub value: String,
@@ -35,6 +43,7 @@ pub enum ProjectMetadataSource {
     Pep621Project,
     Poetry,
     SetupPy,
+    RequirementsTxt,
 }
 
 impl ProjectMetadataSource {
@@ -43,6 +52,7 @@ impl ProjectMetadataSource {
             Self::Pep621Project => "[project] in pyproject.toml",
             Self::Poetry => "[tool.poetry] in pyproject.toml",
             Self::SetupPy => "setup.py fallback",
+            Self::RequirementsTxt => "requirements.txt fallback",
         }
     }
 }
@@ -149,8 +159,26 @@ pub fn load_project_metadata(
         });
     }
 
+    if project_root.join("requirements.txt").is_file() {
+        let package_name = project_root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .unwrap_or("python-app")
+            .to_string();
+
+        return Ok(ProjectMetadata {
+            project_root: project_root.to_path_buf(),
+            package_name,
+            project_scripts: BTreeMap::new(),
+            python_request: resolve_python_request(project_root, python_override, None)?,
+            uv_lock_present,
+            metadata_source: ProjectMetadataSource::RequirementsTxt,
+        });
+    }
+
     Err(miette!(
-        "project root `{}` is missing supported project metadata; expected `[project]`, `[tool.poetry]`, or a parseable `setup.py`",
+        "project root `{}` is missing supported project metadata; expected `[project]`, `[tool.poetry]`, `setup.py`, or `requirements.txt`",
         manifest_path.display()
     ))
 }

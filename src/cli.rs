@@ -62,8 +62,8 @@ pub struct BuildArgs {
 
     #[arg(
         long,
-        value_name = "NAME",
-        help = "Script name from `[project.scripts]` to package."
+        value_name = "ENTRY",
+        help = "Script name from project metadata, or an explicit mapping like `name=module:function`."
     )]
     pub entrypoint: Option<String>,
 
@@ -101,8 +101,8 @@ pub struct InspectArgs {
 
     #[arg(
         long,
-        value_name = "NAME",
-        help = "Script name from `[project.scripts]` to inspect."
+        value_name = "ENTRY",
+        help = "Script name from project metadata, or an explicit mapping like `name=module:function`."
     )]
     pub entrypoint: Option<String>,
 

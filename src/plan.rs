@@ -13,6 +13,7 @@ pub struct BuildPlan {
     pub install_strategy: InstallStrategy,
     pub entrypoint_name: String,
     pub entrypoint_target: String,
+    pub source_overlay: Option<SourceOverlay>,
     pub uv_lock_present: bool,
     pub inner_env_relative_path: PathBuf,
 }
@@ -22,6 +23,12 @@ pub enum InstallStrategy {
     UvSync { frozen: bool },
     UvPipInstallProject,
     UvPipInstallRequirements { relative_path: PathBuf },
+}
+
+#[derive(Debug, Clone)]
+pub struct SourceOverlay {
+    pub module_root: String,
+    pub relative_source_path: PathBuf,
 }
 
 impl InstallStrategy {
@@ -39,7 +46,7 @@ impl InstallStrategy {
 
 impl BuildPlan {
     pub fn resolve(metadata: ProjectMetadata, entrypoint_override: Option<&str>) -> Result<Self> {
-        let (entrypoint_name, entrypoint_target) =
+        let (entrypoint_name, entrypoint_target, source_overlay) =
             select_entrypoint(&metadata, entrypoint_override)?;
         let install_strategy = select_install_strategy(&metadata);
 
@@ -51,6 +58,7 @@ impl BuildPlan {
             install_strategy,
             entrypoint_name,
             entrypoint_target,
+            source_overlay,
             uv_lock_present: metadata.uv_lock_present,
             inner_env_relative_path: PathBuf::from(DEFAULT_INNER_ENV_NAME),
         })
@@ -85,31 +93,87 @@ fn select_install_strategy(metadata: &ProjectMetadata) -> InstallStrategy {
 fn select_entrypoint(
     metadata: &ProjectMetadata,
     entrypoint_override: Option<&str>,
-) -> Result<(String, String)> {
+) -> Result<(String, String, Option<SourceOverlay>)> {
     if let Some(name) = entrypoint_override {
         if let Some(target) = metadata.project_scripts.get(name) {
-            return Ok((name.to_string(), target.clone()));
+            return Ok((name.to_string(), target.clone(), None));
+        }
+
+        if let Some((entrypoint_name, entrypoint_target)) = parse_explicit_entrypoint(name) {
+            let source_overlay = resolve_source_overlay(metadata, &entrypoint_target)?;
+            return Ok((entrypoint_name, entrypoint_target, source_overlay));
         }
 
         return Err(miette!(
-            "requested entrypoint `{name}` was not found in `[project.scripts]`"
+            "requested entrypoint `{name}` was not found in project metadata; use `--entrypoint name=module:function` for explicit entrypoints"
         ));
     }
 
     match metadata.project_scripts.len() {
         0 => Err(miette!(
-            "project is not packable yet because `[project.scripts]` is empty; pass `--entrypoint` once additional entrypoint modes exist"
+            "project is not packable yet because no entrypoint was declared; pass `--entrypoint name=module:function` for metadata-less projects"
         )),
         1 => metadata
             .project_scripts
             .iter()
             .next()
-            .map(|(name, target)| (name.clone(), target.clone()))
+            .map(|(name, target)| (name.clone(), target.clone(), None))
             .ok_or_else(|| miette!("failed to resolve the only project script")),
         _ => Err(miette!(
             "project defines multiple scripts; rerun with `--entrypoint <name>` to choose one"
         )),
     }
+}
+
+fn parse_explicit_entrypoint(value: &str) -> Option<(String, String)> {
+    let (name, target) = value.split_once('=')?;
+    let name = name.trim();
+    let target = target.trim();
+    if name.is_empty() || target.is_empty() || !target.contains(':') {
+        return None;
+    }
+
+    Some((name.to_string(), target.to_string()))
+}
+
+fn resolve_source_overlay(
+    metadata: &ProjectMetadata,
+    entrypoint_target: &str,
+) -> Result<Option<SourceOverlay>> {
+    if !matches!(
+        metadata.metadata_source,
+        ProjectMetadataSource::RequirementsTxt
+    ) {
+        return Ok(None);
+    }
+
+    let module_root = entrypoint_target
+        .split(':')
+        .next()
+        .and_then(|module| module.split('.').next())
+        .filter(|module| !module.is_empty())
+        .ok_or_else(|| {
+            miette!("explicit entrypoint `{entrypoint_target}` is not a valid `module:function` reference")
+        })?;
+
+    for relative_path in [
+        PathBuf::from(module_root),
+        PathBuf::from("src").join(module_root),
+        PathBuf::from(format!("{module_root}.py")),
+        PathBuf::from("src").join(format!("{module_root}.py")),
+    ] {
+        if metadata.project_root.join(&relative_path).exists() {
+            return Ok(Some(SourceOverlay {
+                module_root: module_root.to_string(),
+                relative_source_path: relative_path,
+            }));
+        }
+    }
+
+    Err(miette!(
+        "explicit entrypoint `{entrypoint_target}` requires local source `{module_root}` but no matching file or package was found under `{}`",
+        metadata.project_root.display()
+    ))
 }
 
 #[cfg(test)]

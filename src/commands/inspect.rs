@@ -2,7 +2,9 @@ use crate::{
     cli::InspectArgs,
     commands::doctor::check_conda,
     plan::BuildPlan,
-    project::{PythonRequest, PythonRequestSource, load_project_metadata},
+    project::{
+        PythonRequest, PythonRequestSource, load_project_metadata, supported_project_markers,
+    },
 };
 use console::style;
 use miette::{Result, miette};
@@ -105,15 +107,30 @@ pub fn run(args: InspectArgs) -> Result<()> {
         }
     }
 
-    let pyproject_path = args.project.join("pyproject.toml");
-    if pyproject_path.is_file() {
-        println!("  {} {}", ok_badge(), value("pyproject.toml found"));
-        println!("     {}", subtle(&pyproject_path.display().to_string()));
+    let project_markers = supported_project_markers(&args.project);
+    if !project_markers.is_empty() {
+        println!(
+            "  {} {}",
+            ok_badge(),
+            value("supported project marker found")
+        );
+        for marker in project_markers {
+            println!("     {}", subtle(&marker.display().to_string()));
+        }
     } else {
-        println!("  {} {}", fail_badge(), value("pyproject.toml missing"));
+        println!(
+            "  {} {}",
+            fail_badge(),
+            value("supported project marker missing")
+        );
         println!(
             "     {}",
-            subtle(&format!("expected `{}`", pyproject_path.display()))
+            subtle(&format!(
+                "expected one of `{}`, `{}`, or `{}`",
+                args.project.join("pyproject.toml").display(),
+                args.project.join("setup.py").display(),
+                args.project.join("requirements.txt").display()
+            ))
         );
     }
 

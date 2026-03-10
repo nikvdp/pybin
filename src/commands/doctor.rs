@@ -1,3 +1,4 @@
+use crate::project::supported_project_markers;
 use miette::{IntoDiagnostic, Result, WrapErr, miette};
 use std::{
     ffi::OsString,
@@ -6,9 +7,9 @@ use std::{
 };
 
 pub fn require_host_prerequisites(project_root: &Path) -> Result<()> {
-    if !project_root.join("pyproject.toml").is_file() {
+    if supported_project_markers(project_root).is_empty() {
         return Err(miette!(
-            "`{}` does not contain a `pyproject.toml` file",
+            "`{}` does not contain a supported project marker (`pyproject.toml`, `setup.py`, or `requirements.txt`)",
             project_root.display()
         ));
     }
