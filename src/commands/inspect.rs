@@ -16,7 +16,7 @@ pub fn run(args: InspectArgs) -> Result<()> {
     let entrypoint_source = if args.entrypoint.is_some() {
         "set explicitly with `--entrypoint`"
     } else {
-        "auto-detected from `[project.scripts]`"
+        "auto-detected from project metadata"
     };
     let conda_check = check_conda();
     let plan_result = load_project_metadata(&args.project, args.python.as_deref())
@@ -32,6 +32,11 @@ pub fn run(args: InspectArgs) -> Result<()> {
                 path_value(&plan.project_root)
             );
             println!("  {} {}", label("Package:"), value(&plan.package_name));
+            println!(
+                "  {} {}",
+                label("Metadata source:"),
+                value(plan.metadata_source.description())
+            );
             println!(
                 "  {} {}",
                 label("Final executable:"),
@@ -139,6 +144,8 @@ fn format_python_request(request: &PythonRequest) -> String {
         PythonRequestSource::DotPythonVersion => ".python-version",
         PythonRequestSource::DotVenv => ".venv/pyvenv.cfg",
         PythonRequestSource::RequiresPython => "project.requires-python",
+        PythonRequestSource::PoetryDependency => "tool.poetry.dependencies.python",
+        PythonRequestSource::SetupPyPythonRequires => "setup.py python_requires",
     };
 
     format!("{} ({source})", request.value)

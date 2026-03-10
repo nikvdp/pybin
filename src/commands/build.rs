@@ -294,7 +294,7 @@ enum EntrypointSource {
 impl EntrypointSource {
     fn description(self) -> &'static str {
         match self {
-            EntrypointSource::AutoDetected => "auto-detected from `[project.scripts]`",
+            EntrypointSource::AutoDetected => "auto-detected from project metadata",
             EntrypointSource::ExplicitOverride => "set explicitly with `--entrypoint`",
         }
     }
@@ -306,6 +306,8 @@ fn format_python_request(request: &PythonRequest) -> String {
         PythonRequestSource::DotPythonVersion => ".python-version",
         PythonRequestSource::DotVenv => ".venv/pyvenv.cfg",
         PythonRequestSource::RequiresPython => "project.requires-python",
+        PythonRequestSource::PoetryDependency => "tool.poetry.dependencies.python",
+        PythonRequestSource::SetupPyPythonRequires => "setup.py python_requires",
     };
 
     format!("{} ({source})", request.value)

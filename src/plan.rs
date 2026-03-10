@@ -1,4 +1,4 @@
-use crate::project::{ProjectMetadata, PythonRequest};
+use crate::project::{ProjectMetadata, ProjectMetadataSource, PythonRequest};
 use miette::{Result, miette};
 use std::path::{Path, PathBuf};
 
@@ -9,6 +9,7 @@ pub struct BuildPlan {
     pub project_root: PathBuf,
     pub package_name: String,
     pub python_request: Option<PythonRequest>,
+    pub metadata_source: ProjectMetadataSource,
     pub entrypoint_name: String,
     pub entrypoint_target: String,
     pub uv_lock_present: bool,
@@ -24,6 +25,7 @@ impl BuildPlan {
             project_root: metadata.project_root,
             package_name: metadata.package_name,
             python_request: metadata.python_request,
+            metadata_source: metadata.metadata_source,
             entrypoint_name,
             entrypoint_target,
             uv_lock_present: metadata.uv_lock_present,
