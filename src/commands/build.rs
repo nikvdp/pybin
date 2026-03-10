@@ -168,13 +168,13 @@ impl BuildProgress for BuildUi {
 
     fn on_phase_start(&mut self, phase: BuildPhase) {
         self.current_step += 1;
-        let message = format!("{} {}", self.step_prefix(), phase.start_message());
         match &self.mode {
             ProgressMode::Spinner(spinner) => {
                 spinner.set_position(self.current_step as u64);
-                spinner.set_message(message);
+                spinner.set_message(phase.start_message().to_string());
             }
             ProgressMode::Plain => {
+                let message = format!("{} {}", self.step_prefix(), phase.start_message());
                 eprintln!("{message}...");
             }
         }
