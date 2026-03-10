@@ -39,10 +39,8 @@ pub struct Cli {
 pub enum Command {
     /// Build a self-extracting binary from a uv project
     Build(BuildArgs),
-    /// Inspect the project metadata and resolved build plan
+    /// Inspect whether a project is packable and show the resolved build plan
     Inspect(InspectArgs),
-    /// Check project readiness and host prerequisites before a build
-    Doctor(DoctorArgs),
 }
 
 #[derive(Debug, Args)]
@@ -105,14 +103,4 @@ pub struct InspectArgs {
         help = "Override the Python request before inspection."
     )]
     pub python: Option<String>,
-}
-
-#[derive(Debug, Args)]
-pub struct DoctorArgs {
-    #[arg(
-        default_value = ".",
-        value_name = "PROJECT",
-        help = "Path to the uv project root."
-    )]
-    pub project: PathBuf,
 }

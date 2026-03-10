@@ -25,6 +25,5 @@ pub fn run() -> Result<()> {
     match cli.command {
         Command::Build(args) => commands::build::run(args),
         Command::Inspect(args) => commands::inspect::run(args),
-        Command::Doctor(args) => commands::doctor::run(args),
     }
 }

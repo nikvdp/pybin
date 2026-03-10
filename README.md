@@ -75,16 +75,10 @@ Override the extraction cache root:
 PYBIN_CACHE_DIR=/tmp/pybin-cache /tmp/demo-sfx hello
 ```
 
-Inspect the resolved build plan before packaging:
+Inspect whether a project is packable and show the resolved build plan:
 
 ```bash
 pybin inspect /path/to/project
-```
-
-Check project readiness and host prerequisites:
-
-```bash
-pybin doctor /path/to/project
 ```
 
 ## Releases
@@ -122,7 +116,7 @@ the extraction cache, and runs it again.
   auto-created `target/pybin/<timestamp>-<slug>/logs` directory.
 - The packaged binary is same-platform only. `conda-pack` does not make a macOS
   build portable to Linux or vice versa.
-- Host `conda` is required. `pybin doctor` is the quickest preflight check.
+- Host `conda` is required. `pybin inspect` is the quickest preflight check.
 - Packaging expects `[project.scripts]` to define the entrypoint. If the project
   has multiple scripts, pass `--entrypoint <name>`.
 - The inner environment is always built with `uv sync --no-editable`.

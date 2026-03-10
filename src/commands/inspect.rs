@@ -1,38 +1,139 @@
 use crate::{
     cli::InspectArgs,
+    commands::doctor::check_conda,
     plan::BuildPlan,
-    project::{PythonRequestSource, load_project_metadata},
+    project::{PythonRequest, PythonRequestSource, load_project_metadata},
 };
-use miette::Result;
+use console::style;
+use miette::{Result, miette};
+use std::{
+    env,
+    io::{self, IsTerminal},
+    path::{Path, PathBuf},
+};
 
 pub fn run(args: InspectArgs) -> Result<()> {
-    let metadata = load_project_metadata(&args.project, args.python.as_deref())?;
-    let plan = BuildPlan::resolve(metadata, args.entrypoint.as_deref())?;
+    let entrypoint_source = if args.entrypoint.is_some() {
+        "set explicitly with `--entrypoint`"
+    } else {
+        "auto-detected from `[project.scripts]`"
+    };
+    let conda_check = check_conda();
+    let plan_result = load_project_metadata(&args.project, args.python.as_deref())
+        .and_then(|metadata| BuildPlan::resolve(metadata, args.entrypoint.as_deref()));
 
-    println!("project root: {}", plan.project_root.display());
-    println!("package: {}", plan.package_name);
-    println!(
-        "entrypoint: {} -> {}",
-        plan.entrypoint_name, plan.entrypoint_target
-    );
-    println!(
-        "python request: {}",
-        plan.python_request
-            .as_ref()
-            .map(format_python_request)
-            .unwrap_or_else(|| "<none>".to_string())
-    );
-    println!("uv.lock present: {}", yes_no(plan.uv_lock_present));
-    println!(
-        "inner uv env: <conda-prefix>/{}",
-        plan.inner_env_relative_path.display()
-    );
-    println!("release shape: single pybin binary used as the SFX stub");
+    println!("{}", heading("Resolved build plan"));
+    match &plan_result {
+        Ok(plan) => {
+            let final_executable = resolve_output_path(plan);
+            println!(
+                "  {} {}",
+                label("Project root:"),
+                path_value(&plan.project_root)
+            );
+            println!("  {} {}", label("Package:"), value(&plan.package_name));
+            println!(
+                "  {} {}",
+                label("Final executable:"),
+                primary_path(&final_executable)
+            );
+            println!(
+                "  {} {} -> {} ({})",
+                label("Entrypoint:"),
+                value(&plan.entrypoint_name),
+                value(&plan.entrypoint_target),
+                subtle(entrypoint_source)
+            );
+            println!(
+                "  {} {}",
+                label("Python request:"),
+                plan.python_request
+                    .as_ref()
+                    .map(format_python_request)
+                    .unwrap_or_else(|| "<none>".to_string())
+            );
+            println!(
+                "  {} {}",
+                label("uv.lock present:"),
+                value(yes_no(plan.uv_lock_present))
+            );
+            println!(
+                "  {} {}",
+                label("Inner uv env:"),
+                value(&format!(
+                    "<conda-prefix>/{}",
+                    plan.inner_env_relative_path.display()
+                ))
+            );
+            println!(
+                "  {} {}",
+                label("Release shape:"),
+                value("single pybin binary used as the SFX stub")
+            );
+        }
+        Err(error) => {
+            println!("  {} {}", label("Project root:"), path_value(&args.project));
+            println!(
+                "  {} {}",
+                label("Status:"),
+                danger("could not resolve a packable build plan")
+            );
+            println!("  {} {}", label("Reason:"), subtle(&error.to_string()));
+        }
+    }
 
-    Ok(())
+    println!();
+    println!("{}", heading("Host checks"));
+    match &conda_check {
+        Ok(conda) => {
+            println!("  {} {}", ok_badge(), value("conda available"));
+            println!("     {}", subtle(&conda.version_line));
+        }
+        Err(error) => {
+            println!("  {} {}", fail_badge(), value("conda unavailable"));
+            println!("     {}", subtle(&error.to_string()));
+        }
+    }
+
+    let pyproject_path = args.project.join("pyproject.toml");
+    if pyproject_path.is_file() {
+        println!("  {} {}", ok_badge(), value("pyproject.toml found"));
+        println!("     {}", subtle(&pyproject_path.display().to_string()));
+    } else {
+        println!("  {} {}", fail_badge(), value("pyproject.toml missing"));
+        println!(
+            "     {}",
+            subtle(&format!("expected `{}`", pyproject_path.display()))
+        );
+    }
+
+    println!();
+    let packable = conda_check.is_ok() && plan_result.is_ok();
+    println!("{}", heading_done("Packable"));
+    println!(
+        "  {} {}",
+        label("Status:"),
+        if packable {
+            success("yes")
+        } else {
+            danger("no")
+        }
+    );
+
+    if packable {
+        Ok(())
+    } else {
+        let reason = match (conda_check.err(), plan_result.err()) {
+            (Some(error), Some(plan_error)) => format!("{plan_error}; {error}"),
+            (Some(error), None) => error.to_string(),
+            (None, Some(plan_error)) => plan_error.to_string(),
+            (None, None) => "unknown packability failure".to_string(),
+        };
+        Err(miette!("project is not packable: {reason}"))
+    }
 }
 
-fn format_python_request(request: &crate::project::PythonRequest) -> String {
+fn format_python_request(request: &PythonRequest) -> String {
     let source = match request.source {
         PythonRequestSource::Override => "override",
         PythonRequestSource::DotPythonVersion => ".python-version",
@@ -45,4 +146,105 @@ fn format_python_request(request: &crate::project::PythonRequest) -> String {
 
 fn yes_no(value: bool) -> &'static str {
     if value { "yes" } else { "no" }
+}
+
+fn resolve_output_path(plan: &BuildPlan) -> PathBuf {
+    let mut filename = plan.entrypoint_name.clone();
+    if cfg!(windows) {
+        filename.push_str(".exe");
+    }
+
+    plan.project_root.join("dist").join(filename)
+}
+
+fn heading(text: &str) -> String {
+    if interactive_ui_enabled() {
+        style(text).bold().to_string()
+    } else {
+        text.to_string()
+    }
+}
+
+fn heading_done(text: &str) -> String {
+    if interactive_ui_enabled() {
+        style(text).green().bold().to_string()
+    } else {
+        text.to_string()
+    }
+}
+
+fn label(text: &str) -> String {
+    if interactive_ui_enabled() {
+        style(text).dim().to_string()
+    } else {
+        text.to_string()
+    }
+}
+
+fn value(text: &str) -> String {
+    text.to_string()
+}
+
+fn subtle(text: &str) -> String {
+    if interactive_ui_enabled() {
+        style(text).dim().to_string()
+    } else {
+        text.to_string()
+    }
+}
+
+fn success(text: &str) -> String {
+    if interactive_ui_enabled() {
+        style(text).green().bold().to_string()
+    } else {
+        text.to_string()
+    }
+}
+
+fn danger(text: &str) -> String {
+    if interactive_ui_enabled() {
+        style(text).red().bold().to_string()
+    } else {
+        text.to_string()
+    }
+}
+
+fn ok_badge() -> String {
+    if interactive_ui_enabled() {
+        style("[ok]").green().bold().to_string()
+    } else {
+        "[ok]".to_string()
+    }
+}
+
+fn fail_badge() -> String {
+    if interactive_ui_enabled() {
+        style("[fail]").red().bold().to_string()
+    } else {
+        "[fail]".to_string()
+    }
+}
+
+fn path_value(path: &Path) -> String {
+    let value = path.display().to_string();
+    if interactive_ui_enabled() {
+        style(value).cyan().to_string()
+    } else {
+        value
+    }
+}
+
+fn primary_path(path: &Path) -> String {
+    let value = path.display().to_string();
+    if interactive_ui_enabled() {
+        style(value).green().bold().to_string()
+    } else {
+        value
+    }
+}
+
+fn interactive_ui_enabled() -> bool {
+    io::stdout().is_terminal()
+        && io::stderr().is_terminal()
+        && env::var("TERM").map(|term| term != "dumb").unwrap_or(true)
 }
