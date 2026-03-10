@@ -315,4 +315,31 @@ legacy-poetry-app = "legacy.cli:main"
             InstallStrategy::UvPipInstallProject
         ));
     }
+
+    #[test]
+    fn accepts_explicit_entrypoint_for_requirements_only_projects() {
+        let dir = tempdir().expect("tempdir");
+        fs::write(dir.path().join("requirements.txt"), "click>=8,<9\n")
+            .expect("write requirements");
+        fs::create_dir_all(dir.path().join("req_app")).expect("create package dir");
+        fs::write(dir.path().join("req_app").join("__init__.py"), "").expect("write init");
+        fs::write(
+            dir.path().join("req_app").join("cli.py"),
+            "def main():\n    return 0\n",
+        )
+        .expect("write cli");
+
+        let metadata = load_project_metadata(dir.path(), Some("3.12")).expect("metadata");
+        let plan = BuildPlan::resolve(metadata, Some("req-app=req_app.cli:main")).expect("plan");
+
+        assert_eq!(plan.entrypoint_name, "req-app");
+        assert_eq!(plan.entrypoint_target, "req_app.cli:main");
+        assert!(matches!(
+            plan.install_strategy,
+            InstallStrategy::UvPipInstallRequirements { .. }
+        ));
+        let overlay = plan.source_overlay.expect("source overlay");
+        assert_eq!(overlay.module_root, "req_app");
+        assert_eq!(overlay.relative_source_path, PathBuf::from("req_app"));
+    }
 }

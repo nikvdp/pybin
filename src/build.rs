@@ -965,6 +965,7 @@ mod tests {
             install_strategy: InstallStrategy::UvSync { frozen: true },
             entrypoint_name: "demo".to_string(),
             entrypoint_target: "demo.cli:main".to_string(),
+            source_overlay: None,
             uv_lock_present: true,
             inner_env_relative_path: PathBuf::from("uv-env"),
         };
@@ -985,6 +986,7 @@ mod tests {
             install_strategy: InstallStrategy::UvPipInstallProject,
             entrypoint_name: "demo".to_string(),
             entrypoint_target: "demo.cli:main".to_string(),
+            source_overlay: None,
             uv_lock_present: false,
             inner_env_relative_path: PathBuf::from("uv-env"),
         };
@@ -1005,6 +1007,7 @@ mod tests {
             install_strategy: InstallStrategy::UvPipInstallProject,
             entrypoint_name: "demo".to_string(),
             entrypoint_target: "demo.cli:main".to_string(),
+            source_overlay: None,
             uv_lock_present: false,
             inner_env_relative_path: PathBuf::from("uv-env"),
         };

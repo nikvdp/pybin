@@ -119,3 +119,24 @@ setup(
         PythonRequestSource::SetupPyPythonRequires
     ));
 }
+
+#[test]
+fn falls_back_to_requirements_txt_when_no_packaging_metadata_exists() {
+    let dir = tempdir().expect("tempdir");
+    fs::write(dir.path().join("requirements.txt"), "click>=8,<9\n").expect("write requirements");
+
+    let metadata = load_project_metadata(dir.path(), Some("3.12")).expect("metadata");
+
+    assert_eq!(
+        metadata.package_name,
+        dir.path().file_name().unwrap().to_string_lossy()
+    );
+    assert!(metadata.project_scripts.is_empty());
+    assert!(matches!(
+        metadata.metadata_source,
+        ProjectMetadataSource::RequirementsTxt
+    ));
+    let request = metadata.python_request.expect("python request");
+    assert_eq!(request.value, "3.12");
+    assert!(matches!(request.source, PythonRequestSource::Override));
+}
