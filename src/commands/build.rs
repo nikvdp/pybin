@@ -6,6 +6,7 @@ use crate::{
     plan::BuildPlan,
     project::{PythonRequest, PythonRequestSource, load_project_metadata},
 };
+use console::style;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use miette::{IntoDiagnostic, Result};
 use std::{
@@ -54,23 +55,52 @@ pub fn run(args: BuildArgs) -> Result<()> {
     let packaged_entry_shim = prepared.stage_dir.join(&prepared.launcher_relpath);
 
     println!();
-    println!("Done");
-    println!("  Final executable: {}", output_path.display());
-    println!("  Run it: {}", output_path.display());
-    println!("  Build id: {}", manifest.build_uid);
-    println!("  Logs directory: {}", prepared.logs_dir.display());
+    println!("{}", heading_done("Done"));
+    println!(
+        "  {} {}",
+        label("Final executable:"),
+        primary_path(&output_path)
+    );
+    println!("  {} {}", label("Run it:"), path_value(&output_path));
+    println!("  {} {}", label("Build id:"), value(&manifest.build_uid));
+    println!(
+        "  {} {}",
+        label("Logs directory:"),
+        path_value(&prepared.logs_dir)
+    );
 
     println!();
-    println!("Debug paths");
-    println!("  Work directory: {}", prepared.work_dir.display());
-    println!("  Conda build prefix: {}", prepared.conda_prefix.display());
-    println!("  Inner uv env: {}", prepared.inner_env_path.display());
+    println!("{}", heading_debug("Debug paths"));
     println!(
-        "  Packed conda archive: {}",
-        prepared.packed_env_path.display()
+        "  {} {}",
+        label("Work directory:"),
+        path_value(&prepared.work_dir)
     );
-    println!("  Staging directory: {}", prepared.stage_dir.display());
-    println!("  Packaged entry shim: {}", packaged_entry_shim.display());
+    println!(
+        "  {} {}",
+        label("Conda build prefix:"),
+        path_value(&prepared.conda_prefix)
+    );
+    println!(
+        "  {} {}",
+        label("Inner uv env:"),
+        path_value(&prepared.inner_env_path)
+    );
+    println!(
+        "  {} {}",
+        label("Packed conda archive:"),
+        path_value(&prepared.packed_env_path)
+    );
+    println!(
+        "  {} {}",
+        label("Staging directory:"),
+        path_value(&prepared.stage_dir)
+    );
+    println!(
+        "  {} {}",
+        label("Packaged entry shim:"),
+        path_value(&packaged_entry_shim)
+    );
 
     Ok(())
 }
@@ -114,18 +144,32 @@ impl BuildUi {
         output_path: &Path,
         entrypoint_source: EntrypointSource,
     ) {
-        self.println("Build plan");
-        self.println(&format!("  Project root: {}", plan.project_root.display()));
-        self.println(&format!("  Package: {}", plan.package_name));
-        self.println(&format!("  Final executable: {}", output_path.display()));
+        self.println(&heading("Build plan"));
         self.println(&format!(
-            "  Entrypoint: {} -> {} ({})",
-            plan.entrypoint_name,
-            plan.entrypoint_target,
-            entrypoint_source.description()
+            "  {} {}",
+            label("Project root:"),
+            path_value(&plan.project_root)
         ));
         self.println(&format!(
-            "  Python request: {}",
+            "  {} {}",
+            label("Package:"),
+            value(&plan.package_name)
+        ));
+        self.println(&format!(
+            "  {} {}",
+            label("Final executable:"),
+            primary_path(output_path)
+        ));
+        self.println(&format!(
+            "  {} {} -> {} ({})",
+            label("Entrypoint:"),
+            value(&plan.entrypoint_name),
+            value(&plan.entrypoint_target),
+            subtle(entrypoint_source.description())
+        ));
+        self.println(&format!(
+            "  {} {}",
+            label("Python request:"),
             plan.python_request
                 .as_ref()
                 .map(format_python_request)
@@ -160,10 +204,18 @@ impl BuildProgress for BuildUi {
         _conda_prefix: &Path,
         _inner_env_path: &Path,
     ) {
-        self.println(&format!("  Work directory: {}", work_dir.display()));
-        self.println(&format!("  Logs directory: {}", logs_dir.display()));
+        self.println(&format!(
+            "  {} {}",
+            label("Work directory:"),
+            path_value(work_dir)
+        ));
+        self.println(&format!(
+            "  {} {}",
+            label("Logs directory:"),
+            path_value(logs_dir)
+        ));
         self.println("");
-        self.println("Progress");
+        self.println(&heading("Progress"));
     }
 
     fn on_phase_start(&mut self, phase: BuildPhase) {
@@ -174,7 +226,11 @@ impl BuildProgress for BuildUi {
                 spinner.set_message(phase.start_message().to_string());
             }
             ProgressMode::Plain => {
-                let message = format!("{} {}", self.step_prefix(), phase.start_message());
+                let message = format!(
+                    "{} {}",
+                    subtle(&self.step_prefix()),
+                    value(phase.start_message())
+                );
                 eprintln!("{message}...");
             }
         }
@@ -183,9 +239,9 @@ impl BuildProgress for BuildUi {
     fn on_phase_complete(&mut self, phase: BuildPhase, elapsed: Duration) {
         let message = format!(
             "{} {} ({})",
-            self.step_prefix(),
-            phase.success_message(),
-            format_elapsed(elapsed)
+            subtle(&self.step_prefix()),
+            value(phase.success_message()),
+            subtle(&format_elapsed(elapsed))
         );
         match &self.mode {
             ProgressMode::Spinner(spinner) => spinner.println(message),
@@ -195,10 +251,10 @@ impl BuildProgress for BuildUi {
 
     fn on_phase_failed(&mut self, phase: BuildPhase, elapsed: Duration, error: &miette::Report) {
         let message = format!(
-            "{} {} failed after {}: {}",
-            self.step_prefix(),
-            phase.title(),
-            format_elapsed(elapsed),
+            "{} {} {}: {}",
+            subtle(&self.step_prefix()),
+            danger(&format!("{} failed", phase.title())),
+            subtle(&format!("after {}", format_elapsed(elapsed))),
             error
         );
         match &self.mode {
@@ -209,7 +265,7 @@ impl BuildProgress for BuildUi {
 }
 
 fn spinner_supported() -> bool {
-    io::stderr().is_terminal() && env::var("TERM").map(|term| term != "dumb").unwrap_or(true)
+    interactive_ui_enabled()
 }
 
 fn format_elapsed(elapsed: Duration) -> String {
@@ -246,6 +302,82 @@ fn format_python_request(request: &PythonRequest) -> String {
     };
 
     format!("{} ({source})", request.value)
+}
+
+fn heading(text: &str) -> String {
+    if interactive_ui_enabled() {
+        style(text).bold().to_string()
+    } else {
+        text.to_string()
+    }
+}
+
+fn heading_done(text: &str) -> String {
+    if interactive_ui_enabled() {
+        style(text).green().bold().to_string()
+    } else {
+        text.to_string()
+    }
+}
+
+fn heading_debug(text: &str) -> String {
+    if interactive_ui_enabled() {
+        style(text).bold().dim().to_string()
+    } else {
+        text.to_string()
+    }
+}
+
+fn label(text: &str) -> String {
+    if interactive_ui_enabled() {
+        style(text).dim().to_string()
+    } else {
+        text.to_string()
+    }
+}
+
+fn value(text: &str) -> String {
+    text.to_string()
+}
+
+fn subtle(text: &str) -> String {
+    if interactive_ui_enabled() {
+        style(text).dim().to_string()
+    } else {
+        text.to_string()
+    }
+}
+
+fn danger(text: &str) -> String {
+    if interactive_ui_enabled() {
+        style(text).red().bold().to_string()
+    } else {
+        text.to_string()
+    }
+}
+
+fn path_value(path: &Path) -> String {
+    let value = path.display().to_string();
+    if interactive_ui_enabled() {
+        style(value).cyan().to_string()
+    } else {
+        value
+    }
+}
+
+fn primary_path(path: &Path) -> String {
+    let value = path.display().to_string();
+    if interactive_ui_enabled() {
+        style(value).green().bold().to_string()
+    } else {
+        value
+    }
+}
+
+fn interactive_ui_enabled() -> bool {
+    io::stdout().is_terminal()
+        && io::stderr().is_terminal()
+        && env::var("TERM").map(|term| term != "dumb").unwrap_or(true)
 }
 
 fn resolve_output_path(plan: &BuildPlan, output_override: Option<&Path>) -> Result<PathBuf> {
