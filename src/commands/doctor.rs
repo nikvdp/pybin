@@ -91,3 +91,19 @@ fn first_non_empty_line(bytes: &[u8]) -> Option<OsString> {
         .find(|line| !line.is_empty())
         .map(OsString::from)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::missing_conda_guidance;
+
+    #[test]
+    fn missing_conda_guidance_mentions_miniforge() {
+        let guidance = missing_conda_guidance();
+        assert!(guidance.contains("Miniforge"));
+        assert!(
+            guidance.contains("https://conda-forge.org/download/")
+                || guidance.contains("github.com/conda-forge/miniforge/releases/latest/download")
+        );
+        assert!(guidance.contains("conda --version"));
+    }
+}
