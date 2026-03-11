@@ -1,6 +1,7 @@
 use crate::project::supported_project_markers;
 use miette::{IntoDiagnostic, Result, WrapErr, miette};
 use std::{
+    env::consts::OS,
     ffi::OsString,
     path::Path,
     process::{Command, Stdio},
@@ -30,7 +31,7 @@ pub(crate) fn check_conda() -> Result<CondaCheck> {
         .stdout(Stdio::piped())
         .output()
         .into_diagnostic()
-        .wrap_err("failed to run `conda --version`; install conda and ensure it is on PATH")?;
+        .wrap_err_with(missing_conda_guidance)?;
 
     if !output.status.success() {
         return Err(miette!(
@@ -47,6 +48,40 @@ pub(crate) fn check_conda() -> Result<CondaCheck> {
         .into_owned();
 
     Ok(CondaCheck { version_line })
+}
+
+fn missing_conda_guidance() -> String {
+    let mut message = String::from(
+        "failed to run `conda --version`; `conda` does not appear to be installed or on PATH.\n\n",
+    );
+    message.push_str("Recommended installer: Miniforge from conda-forge.\n");
+
+    match OS {
+        "macos" | "linux" => {
+            message.push_str("Official quick install commands:\n");
+            message.push_str("  curl -L -O \"https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh\"\n");
+            message.push_str("  bash Miniforge3-$(uname)-$(uname -m).sh\n");
+            message.push_str("  ~/miniforge3/bin/conda init\n");
+            message.push_str("  exec $SHELL\n");
+            message.push_str("  conda --version\n");
+        }
+        "windows" => {
+            message.push_str("Official download page:\n");
+            message.push_str("  https://conda-forge.org/download/\n");
+            message.push_str("Official silent install command after downloading the installer:\n");
+            message.push_str("  start /wait \"\" Miniforge3-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /D=%UserProfile%\\Miniforge3\n");
+            message.push_str("Then open a new shell and run:\n");
+            message.push_str("  conda --version\n");
+        }
+        _ => {
+            message.push_str("Official download page:\n");
+            message.push_str("  https://conda-forge.org/download/\n");
+            message.push_str("After installing, open a new shell and run:\n");
+            message.push_str("  conda --version\n");
+        }
+    }
+
+    message
 }
 
 fn first_non_empty_line(bytes: &[u8]) -> Option<OsString> {
