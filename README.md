@@ -88,9 +88,15 @@ Pushing a `v*` tag is intended to publish GitHub release assets for:
 
 - macOS `x86_64` and `arm64`
 - Linux `x86_64` and `arm64`
-- Windows `x86_64` as best-effort
 
 Each release asset contains one `pybin` executable for that target platform.
+
+Windows package output is not supported yet. The Windows `pybin` executable can
+compile, but bundles it produces currently include a Unix-style bash launcher
+inside the archive. Windows extracts the bundle and then rejects that inner
+launcher with `not a valid Win32 application` instead of starting the packaged
+Python app. Windows support needs a native `.cmd` or `.exe` launcher inside the
+bundle before Windows-built packages should be published or relied on.
 
 ## Fixture Validation
 
@@ -117,6 +123,9 @@ the extraction cache, and runs it again.
   auto-created `target/pybin/<timestamp>-<slug>/logs` directory.
 - The packaged binary is same-platform only. `conda-pack` does not make a macOS
   build portable to Linux or vice versa.
+- Windows-built packages are currently known not to run because their inner
+  entry launcher is still Unix-style. Use Linux or macOS builders until pybin has
+  a native Windows launcher.
 - Host `conda` is required. `pybin inspect` is the quickest preflight check.
 - Packaging expects `[project.scripts]` to define the entrypoint. If the project
   has multiple scripts, pass `--entrypoint <name>`.
