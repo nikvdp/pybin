@@ -8,7 +8,8 @@ It builds a one-file executable by combining:
 1. an outer conda prefix for relocatability
 2. an inner `uv-env` for normal uv project installs
 3. `conda-pack` for freezing the full prefix
-4. an in-repo Warp-style runner and packer for the final SFX binary
+4. an in-repo [Warp](https://github.com/dgiagio/warp)-style runner and packer
+   for the final SFX binary
 
 The shipped `pybin` executable is self-contained: it is both the CLI you run and
 the SFX stub used to build output binaries.
