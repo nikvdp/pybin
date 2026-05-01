@@ -46,6 +46,8 @@ fn builds_and_runs_the_demo_fixture_as_a_single_binary() {
 
     assert!(!manifest.build_uid.is_empty(), "expected a unique build id");
 
+    fs::remove_dir_all(&prepared.work_dir).expect("remove build work dir before smoke test");
+
     let first = Command::new(&output)
         .env("PYBIN_CACHE_DIR", &cache_dir)
         .args(["smoke", "one"])

@@ -187,6 +187,7 @@ pub fn prepare_build(
             &inner_env_path,
         )
     })?;
+    make_inner_env_relocatable(&paths.conda_prefix, &inner_env_path)?;
 
     run_phase(progress, BuildPhase::PackCondaPrefix, || {
         run_logged(
@@ -708,6 +709,56 @@ fn install_project(
     }
 }
 
+fn make_inner_env_relocatable(conda_prefix: &Path, inner_env_path: &Path) -> Result<()> {
+    #[cfg(target_family = "unix")]
+    {
+        relink_inner_python(conda_prefix, inner_env_path)?;
+    }
+
+    #[cfg(target_family = "windows")]
+    {
+        let _ = (conda_prefix, inner_env_path);
+    }
+
+    Ok(())
+}
+
+#[cfg(target_family = "unix")]
+fn relink_inner_python(conda_prefix: &Path, inner_env_path: &Path) -> Result<()> {
+    use std::os::unix::fs as unix_fs;
+
+    let inner_bin = inner_env_path.join("bin");
+    let inner_python = inner_bin.join("python");
+    let outer_python = conda_prefix.join("bin").join("python");
+    let expected_target = fs::canonicalize(&outer_python).into_diagnostic()?;
+
+    let current_target = match fs::read_link(&inner_python) {
+        Ok(target) => target,
+        Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => return Ok(()),
+        Err(error) => return Err(error).into_diagnostic(),
+    };
+    let current_target = if current_target.is_absolute() {
+        current_target
+    } else {
+        inner_bin.join(current_target)
+    };
+    let current_target = fs::canonicalize(current_target).into_diagnostic()?;
+
+    if current_target != expected_target {
+        return Err(miette!(
+            "inner uv environment Python `{}` points to `{}`, expected `{}`",
+            inner_python.display(),
+            current_target.display(),
+            expected_target.display()
+        ));
+    }
+
+    fs::remove_file(&inner_python).into_diagnostic()?;
+    unix_fs::symlink("../../bin/python", &inner_python).into_diagnostic()?;
+
+    Ok(())
+}
+
 fn install_with_uv_sync(
     plan: &BuildPlan,
     logs_dir: &Path,
@@ -1116,5 +1167,30 @@ mod tests {
         };
 
         assert_eq!(conda_python_spec(&plan), "python>=3.7,<4");
+    }
+
+    #[cfg(target_family = "unix")]
+    #[test]
+    fn relinks_inner_python_to_the_packed_prefix() {
+        use std::os::unix::fs as unix_fs;
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let conda_prefix = temp.path().join("conda-prefix");
+        let inner_env = conda_prefix.join("uv-env");
+        let conda_bin = conda_prefix.join("bin");
+        let inner_bin = inner_env.join("bin");
+        fs::create_dir_all(&conda_bin).expect("conda bin");
+        fs::create_dir_all(&inner_bin).expect("inner bin");
+
+        let outer_python = conda_bin.join("python");
+        fs::write(&outer_python, b"python").expect("outer python");
+        unix_fs::symlink(&outer_python, inner_bin.join("python")).expect("inner python symlink");
+
+        relink_inner_python(&conda_prefix, &inner_env).expect("relink inner python");
+
+        assert_eq!(
+            fs::read_link(inner_bin.join("python")).expect("read relinked python"),
+            PathBuf::from("../../bin/python")
+        );
     }
 }
