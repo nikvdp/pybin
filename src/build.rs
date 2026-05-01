@@ -722,6 +722,7 @@ fn install_with_uv_sync(
         conda_prefix.as_os_str().to_os_string(),
         OsString::from("uv"),
         OsString::from("sync"),
+        OsString::from("--no-dev"),
         OsString::from("--no-editable"),
         OsString::from("--link-mode"),
         OsString::from("copy"),
@@ -955,9 +956,37 @@ fn run_logged(
     }
 
     Err(miette!(
-        "build step `{step_name}` failed; see `{}` for stdout/stderr",
-        log_path.display()
+        "build step `{step_name}` failed; see `{}` for stdout/stderr\n{}",
+        log_path.display(),
+        command_failure_summary(&output)
     ))
+}
+
+fn command_failure_summary(output: &Output) -> String {
+    const MAX_LINES: usize = 80;
+
+    let mut summary = String::new();
+    summary.push_str("\n--- command stdout tail ---\n");
+    summary.push_str(&tail_lines(
+        &String::from_utf8_lossy(&output.stdout),
+        MAX_LINES,
+    ));
+    summary.push_str("\n--- command stderr tail ---\n");
+    summary.push_str(&tail_lines(
+        &String::from_utf8_lossy(&output.stderr),
+        MAX_LINES,
+    ));
+    summary
+}
+
+fn tail_lines(text: &str, max_lines: usize) -> String {
+    let lines = text.lines().collect::<Vec<_>>();
+    let start = lines.len().saturating_sub(max_lines);
+    let mut tail = lines[start..].join("\n");
+    if !tail.is_empty() {
+        tail.push('\n');
+    }
+    tail
 }
 
 fn write_command_log(
