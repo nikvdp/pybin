@@ -46,10 +46,6 @@ jobs:
             target: aarch64-apple-darwin
             archive_ext: tar.gz
             binary_name: pybin
-          - runner: windows-latest
-            target: x86_64-pc-windows-msvc
-            archive_ext: zip
-            binary_name: pybin.exe
     env:
       CARGO_TERM_COLOR: always
     steps:
@@ -71,16 +67,6 @@ jobs:
           cp "target/release/${{ matrix.binary_name }}" "dist/${{ matrix.binary_name }}"
           tar -C dist -czf "$asset" "${{ matrix.binary_name }}"
           echo "RELEASE_ASSET=$asset" >> "$GITHUB_ENV"
-
-      - name: Package archive on Windows
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $asset = "pybin-$env:GITHUB_REF_NAME-${{ matrix.target }}.${{ matrix.archive_ext }}"
-          New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item "target/release/${{ matrix.binary_name }}" "dist/${{ matrix.binary_name }}"
-          Compress-Archive -Path "dist/${{ matrix.binary_name }}" -DestinationPath $asset -Force
-          "RELEASE_ASSET=$asset" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
