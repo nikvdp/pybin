@@ -76,6 +76,12 @@ Override the extraction cache root:
 PYBIN_CACHE_DIR=/tmp/pybin-cache /tmp/demo-sfx hello
 ```
 
+By default, extracted runtimes are cached under the platform local data
+directory:
+
+- macOS: `~/Library/Application Support/pybin/packages/`
+- Linux: `${XDG_DATA_HOME:-~/.local/share}/pybin/packages/`
+
 Inspect whether a project is packable and show the resolved build plan:
 
 ```bash

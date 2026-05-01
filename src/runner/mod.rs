@@ -13,6 +13,8 @@ use std::{
     time::Duration,
 };
 
+const DEFAULT_CACHE_NAMESPACE: &str = "pybin";
+
 pub fn run() -> Result<()> {
     let self_path = env::current_exe().into_diagnostic()?;
     let bundle = sfx::read_bundle(&self_path)?;
@@ -56,7 +58,10 @@ fn cache_path(target: &str) -> Result<PathBuf> {
 
     let root = data_local_dir()
         .ok_or_else(|| miette!("no local data directory was available for cache extraction"))?;
-    Ok(root.join(".pybin").join("packages").join(target))
+    Ok(root
+        .join(DEFAULT_CACHE_NAMESPACE)
+        .join("packages")
+        .join(target))
 }
 
 fn extract(executable: &Path, bundle: &sfx::BundleMetadata, cache_path: &Path) -> Result<()> {
@@ -135,4 +140,16 @@ fn progress_enabled() -> bool {
     std::io::stderr().is_terminal()
         && std::io::stdout().is_terminal()
         && env::var("TERM").map(|term| term != "dumb").unwrap_or(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_cache_path_uses_visible_pybin_namespace() {
+        let path = cache_path("demo-package").expect("default cache path");
+        assert!(path.ends_with("pybin/packages/demo-package"));
+        assert!(!path.to_string_lossy().contains(".pybin"));
+    }
 }
